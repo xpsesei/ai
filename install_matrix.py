@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 print("==================================================")
-print(" Matrix 自动化综合操盘系统 - 独立媒体全兼容版 ")
+print(" Matrix 自动化综合操盘系统 - 全开关可控发布版 ")
 print("==================================================")
 
 BASE_DIR = "/opt/auto_browser_system"
@@ -69,26 +69,31 @@ proxy_fail_counts = {}
 
 DEFAULT_STATUS = {
     "is_running": False,
+    "enable_main_site": True,
     "target_urls": "https://example.com",
+    "enable_stay": True,
+    "stay_min": 8,
+    "stay_max": 20,
+    "random_browse": True,
+    "human_mouse": True,
+    "enable_inner": False,
+    "inner_page_prob": 0,
+    "max_inner_pages": 0,
+    "enable_click": False,
+    "click_selector": "",
+    "sub_click_selector": "",
+    "play_video": False,
     "video_urls": "",
-    "video_only": False,
+    "video_min": 30,
+    "video_max": 90,
     "load_mode": "full",
     "load_timeout": 45,
     "render_wait": 3,
-    "stay_min": 8,
-    "stay_max": 20,
-    "video_min": 30,
-    "video_max": 90,
     "interval_min": 4,
     "interval_max": 8,
     "max_runs": 0,
-    "inner_page_prob": 75,
-    "max_inner_pages": 2,
     "device_mode": "mixed",
-    "play_video": True,
     "referer": "",
-    "random_browse": True,
-    "human_mouse": True,
     "route_mode": "pool",
     "tunnel_proxy": "",
     "tor_new_ip": True,
@@ -96,12 +101,10 @@ DEFAULT_STATUS = {
     "consume_proxy": False,
     "proxy_api": "",
     "proxy_pool": [],
-    "click_selector": "",
-    "sub_click_selector": "",
     "block_ads": True,
     "current_node": "待命",
     "stats": {"total": 0, "success": 0, "failed": 0},
-    "logs": ["[系统提示] 矩阵综合操盘主板已初始化（独立媒体全兼容版），等待下达指令..."]
+    "logs": ["[系统提示] 矩阵综合操盘主板已初始化（全开关可控版），等待下达指令..."]
 }
 
 STATUS = json.loads(json.dumps(DEFAULT_STATUS))
@@ -125,12 +128,13 @@ AD_BLOCK_KEYWORDS = [
 ]
 
 PERSIST_KEYS = [
-    "target_urls", "video_urls", "video_only", "load_mode", "load_timeout", "render_wait",
-    "stay_min", "stay_max", "video_min", "video_max", "interval_min", "interval_max",
-    "max_runs", "inner_page_prob", "max_inner_pages", "device_mode", "play_video",
-    "referer", "random_browse", "human_mouse", "route_mode", "tunnel_proxy", "tor_new_ip",
-    "strict_proxy", "consume_proxy", "proxy_api", "proxy_pool", "click_selector",
-    "sub_click_selector", "block_ads"
+    "enable_main_site", "target_urls", "enable_stay", "stay_min", "stay_max",
+    "random_browse", "human_mouse", "enable_inner", "inner_page_prob", "max_inner_pages",
+    "enable_click", "click_selector", "sub_click_selector", "play_video", "video_urls",
+    "video_min", "video_max", "load_mode", "load_timeout", "render_wait",
+    "interval_min", "interval_max", "max_runs", "device_mode", "referer",
+    "route_mode", "tunnel_proxy", "tor_new_ip", "strict_proxy", "consume_proxy",
+    "proxy_api", "proxy_pool", "block_ads"
 ]
 
 
@@ -316,14 +320,16 @@ def validate_single_proxy(cand):
 def renew_tor_circuit():
     try:
         subprocess.run(["systemctl", "reload", "tor"], check=False, timeout=5)
-        add_log("🔄 [Tor换IP] 已发送重建电路指令，切换新出口 IP...")
+        add_log("🔄 [Tor换IP] 已重建电路，切换新出口 IP...")
         safe_sleep(2.0)
     except Exception:
         pass
 
 
 def simulate_human_browsing(page, profile, stay_seconds, do_scroll=True, do_mouse=True):
-    add_log(f"🧑 [拟人浏览] 计划停留 {stay_seconds} 秒 (滚动:{do_scroll} | 轨迹:{do_mouse})")
+    if stay_seconds <= 0:
+        return
+    add_log(f"🧑 [拟人浏览] 停留 {stay_seconds} 秒 (滚动:{do_scroll} | 轨迹:{do_mouse})")
     start_ts = time.time()
     vw, vh = profile["w"], profile["h"]
     while time.time() - start_ts < stay_seconds and not stop_event.is_set():
@@ -376,33 +382,15 @@ def simulate_human_browsing(page, profile, stay_seconds, do_scroll=True, do_mous
 
 
 def _try_trigger_player_in_frame(page, frame):
-    """在指定 frame 内尝试多种主流播放器控件与 video 起播"""
     play_btn_selectors = [
-        ".vjs-big-play-button",
-        ".vjs-play-control",
-        ".plyr__control--overlaid",
-        "[data-plyr='play']",
-        ".dplayer-play-icon",
-        ".dplayer-video-wrap",
-        ".art-control-play",
-        ".art-state",
-        ".jw-icon-display",
-        ".jw-icon-playback",
-        ".xgplayer-start",
-        ".xgplayer-play",
-        ".prism-big-play-btn",
-        ".prism-play-btn",
-        ".tcp-play-toggle",
-        ".ytp-large-play-button",
-        ".ytp-play-button",
-        "[data-play-pause]",
-        "[class*='play-btn' i]",
-        "[class*='playBtn' i]",
-        "[class*='start-btn' i]",
-        "button[aria-label*='Play' i]",
-        "button[aria-label*='播放']",
-        "button[title*='播放']",
-        "button[title*='Play' i]"
+        ".vjs-big-play-button", ".vjs-play-control", ".plyr__control--overlaid",
+        "[data-plyr='play']", ".dplayer-play-icon", ".dplayer-video-wrap",
+        ".art-control-play", ".art-state", ".jw-icon-display", ".jw-icon-playback",
+        ".xgplayer-start", ".xgplayer-play", ".prism-big-play-btn", ".prism-play-btn",
+        ".tcp-play-toggle", ".ytp-large-play-button", ".ytp-play-button",
+        "[data-play-pause]", "[class*='play-btn' i]", "[class*='playBtn' i]",
+        "[class*='start-btn' i]", "button[aria-label*='Play' i]",
+        "button[aria-label*='播放']", "button[title*='播放']", "button[title*='Play' i]"
     ]
 
     for sel in play_btn_selectors:
@@ -453,8 +441,9 @@ def _try_trigger_player_in_frame(page, frame):
     return False
 
 
-def simulate_video_playback(page, profile, play_seconds):
-    """全播放器兼容的拟人视频播放：扫描主页面+所有iframe，控时播放并防暂停守护"""
+def simulate_video_playback(page, profile, play_seconds, do_mouse=True):
+    if play_seconds <= 0:
+        return
     add_log(f"🎬 [视频任务] 准备在播放页模拟观看 {play_seconds} 秒...")
     safe_sleep(1.5)
 
@@ -466,7 +455,6 @@ def simulate_video_playback(page, profile, play_seconds):
             triggered = True
             break
 
-    # 若未直接找到 video/按钮，兜底点击页面上最大的播放器容器或 iframe 中心
     if not triggered and not stop_event.is_set():
         try:
             target_box = page.evaluate("""() => {
@@ -502,7 +490,6 @@ def simulate_video_playback(page, profile, play_seconds):
         if elapsed - last_check >= 8:
             last_check = elapsed
             capture_preview(page)
-            # 播放防暂停守护：若检测到暂停则自动续播
             for frame in list(page.frames):
                 try:
                     state = frame.evaluate("""() => {
@@ -518,7 +505,7 @@ def simulate_video_playback(page, profile, play_seconds):
                         break
                 except Exception:
                     pass
-            if not profile.get("touch", False) and random.random() < 0.5:
+            if do_mouse and not profile.get("touch", False) and random.random() < 0.5:
                 try:
                     page.mouse.move(
                         random.randint(int(profile["w"] * 0.2), int(profile["w"] * 0.8)),
@@ -585,30 +572,44 @@ def login_required(f):
 
 
 def automation_worker():
-    add_log("🚀 [引擎启动] 操盘核心已开启拟人化运转...")
+    add_log("🚀 [引擎启动] 操盘核心已开启全开关可控模式...")
     run_counter = 0
     api_rotator_idx = 0
     try:
         while not stop_event.is_set():
             with status_lock:
+                enable_main_site = STATUS.get("enable_main_site", True)
                 raw_urls = STATUS["target_urls"]
                 url_list = [u.strip() for u in raw_urls.splitlines() if u.strip()]
+
+                enable_stay = STATUS.get("enable_stay", True)
+                stay_min = max(0, int(STATUS["stay_min"]))
+                stay_max = max(stay_min, int(STATUS["stay_max"]))
+                random_browse = STATUS["random_browse"]
+                human_mouse = STATUS["human_mouse"]
+
+                enable_inner = STATUS.get("enable_inner", False)
+                inner_prob = max(0, min(100, int(STATUS["inner_page_prob"])))
+                max_inner = max(0, int(STATUS["max_inner_pages"]))
+
+                enable_click = STATUS.get("enable_click", False)
+                click_selector = STATUS["click_selector"]
+                sub_click_selector = STATUS["sub_click_selector"]
+
+                play_video = STATUS["play_video"]
                 raw_v_urls = STATUS.get("video_urls", "")
                 video_list = [u.strip() for u in raw_v_urls.splitlines() if u.strip()]
-                video_only = STATUS.get("video_only", False)
+                video_min = max(0, int(STATUS["video_min"]))
+                video_max = max(video_min, int(STATUS["video_max"]))
+
                 load_mode = STATUS.get("load_mode", "full")
                 load_timeout_ms = max(10, int(STATUS.get("load_timeout", 45))) * 1000
                 render_wait = max(0, int(STATUS.get("render_wait", 3)))
-                stay_min = max(2, int(STATUS["stay_min"]))
-                stay_max = max(stay_min, int(STATUS["stay_max"]))
-                video_min = max(5, int(STATUS["video_min"]))
-                video_max = max(video_min, int(STATUS["video_max"]))
-                interval_min = max(1, int(STATUS["interval_min"]))
+                interval_min = max(0, int(STATUS["interval_min"]))
                 interval_max = max(interval_min, int(STATUS["interval_max"]))
                 max_runs = max(0, int(STATUS["max_runs"]))
-                inner_prob = max(0, min(100, int(STATUS["inner_page_prob"])))
-                max_inner = max(0, int(STATUS["max_inner_pages"]))
                 device_mode = STATUS["device_mode"]
+
                 route_mode = STATUS.get("route_mode", "pool")
                 tunnel_proxy = STATUS.get("tunnel_proxy", "").strip()
                 tor_new_ip = STATUS.get("tor_new_ip", True)
@@ -617,17 +618,15 @@ def automation_worker():
                 proxy_api = STATUS["proxy_api"]
                 proxy_pool = list(STATUS["proxy_pool"])
                 block_ads = STATUS["block_ads"]
-                click_selector = STATUS["click_selector"]
-                sub_click_selector = STATUS["sub_click_selector"]
-                random_browse = STATUS["random_browse"]
-                human_mouse = STATUS["human_mouse"]
-                play_video = STATUS["play_video"]
 
             if max_runs > 0 and run_counter >= max_runs:
                 add_log(f"🏁 [任务达标] 已完成设定的 {max_runs} 轮任务，自动停机。")
                 break
-            if not url_list and not video_list:
-                add_log("⚠️ [等待配置] 普通 URL 与播放页 URL 均为空，休眠 5 秒...")
+
+            has_main_task = enable_main_site and len(url_list) > 0
+            has_video_task = play_video and video_max > 0
+            if not has_main_task and not (has_video_task and len(video_list) > 0):
+                add_log("⚠️ [等待配置] 未开启有效浏览任务或 URL 为空，休眠 5 秒...")
                 safe_sleep(5)
                 continue
 
@@ -746,7 +745,7 @@ def automation_worker():
                     page = context.new_page()
                     page.set_default_timeout(25000)
 
-                    scope_url = (video_list[0] if video_only and video_list else (url_list[0] if url_list else video_list[0]))
+                    scope_url = url_list[0] if has_main_task else video_list[0]
                     if not scope_url.startswith(("http://", "https://")):
                         scope_url = "https://" + scope_url
 
@@ -769,8 +768,8 @@ def automation_worker():
                     traffic_referer = select_traffic_channel()
                     active_page = page
 
-                    # 模块一：常规网站游览（若未开启仅播放模式且填有目标 URL）
-                    if not video_only and url_list:
+                    # 模块一：普通网页访问（仅在开关开启且 URL 非空时执行）
+                    if has_main_task:
                         target_url = random.choice(url_list)
                         if not target_url.startswith(("http://", "https://")):
                             target_url = "https://" + target_url
@@ -789,10 +788,12 @@ def automation_worker():
                             safe_sleep(render_wait)
                         capture_preview(page)
 
-                        main_stay = random.randint(stay_min, stay_max)
-                        simulate_human_browsing(page, profile, main_stay, do_scroll=random_browse, do_mouse=human_mouse)
+                        if enable_stay and stay_max > 0:
+                            main_stay = random.randint(stay_min, stay_max)
+                            simulate_human_browsing(page, profile, main_stay, do_scroll=random_browse, do_mouse=human_mouse)
 
-                        if max_inner > 0 and random.randint(1, 100) <= inner_prob and not stop_event.is_set():
+                        # 深度游览：开关开启 且 概率>0 且 数量>0 时才执行
+                        if enable_inner and inner_prob > 0 and max_inner > 0 and random.randint(1, 100) <= inner_prob and not stop_event.is_set():
                             pages_to_visit = random.randint(1, max_inner)
                             main_domain = urlparse(target_url).netloc
                             visited = {target_url.rstrip("/")}
@@ -834,21 +835,24 @@ def automation_worker():
                                         safe_sleep(max(2, render_wait))
 
                                     capture_preview(page)
-                                    inner_stay = random.randint(max(3, stay_min // 2), max(5, stay_max // 2))
-                                    simulate_human_browsing(page, profile, inner_stay, do_scroll=random_browse, do_mouse=human_mouse)
+                                    if enable_stay and stay_max > 0:
+                                        inner_stay = random.randint(max(1, stay_min // 2), max(1, stay_max // 2))
+                                        simulate_human_browsing(page, profile, inner_stay, do_scroll=random_browse, do_mouse=human_mouse)
                                 except Exception:
                                     break
 
-                        if click_selector and not stop_event.is_set():
+                        # 链式点击：开关开启 且 选择器非空时才执行
+                        if enable_click and click_selector and not stop_event.is_set():
                             active_page = perform_click(page, context, click_selector, profile, "一级点击")
-                            simulate_human_browsing(active_page, profile, random.randint(4, 8), do_scroll=random_browse, do_mouse=human_mouse)
+                            if enable_stay and stay_max > 0:
+                                simulate_human_browsing(active_page, profile, random.randint(3, 6), do_scroll=random_browse, do_mouse=human_mouse)
                             if sub_click_selector and not stop_event.is_set():
                                 active_page = perform_click(active_page, context, sub_click_selector, profile, "二级点击")
-                                safe_sleep(random.uniform(2.0, 4.0))
+                                safe_sleep(2.0)
                                 capture_preview(active_page)
 
-                    # 模块二：独立视频播放任务
-                    if (video_only or play_video) and not stop_event.is_set():
+                    # 模块二：独立视频播放任务（开关开启 且 播放时长>0 时执行）
+                    if has_video_task and not stop_event.is_set():
                         if video_list:
                             v_url = random.choice(video_list)
                             if not v_url.startswith(("http://", "https://")):
@@ -868,7 +872,7 @@ def automation_worker():
                             active_page = page
 
                         actual_watch = random.randint(video_min, video_max)
-                        simulate_video_playback(active_page, profile, actual_watch)
+                        simulate_video_playback(active_page, profile, actual_watch, do_mouse=human_mouse)
 
                     cycle_ok = True
             except Exception as e:
@@ -886,7 +890,7 @@ def automation_worker():
                 else:
                     STATUS["stats"]["failed"] += 1
 
-            if not stop_event.is_set() and (max_runs == 0 or run_counter < max_runs):
+            if not stop_event.is_set() and (max_runs == 0 or run_counter < max_runs) and interval_max > 0:
                 cool_down = random.randint(interval_min, interval_max)
                 add_log(f"⏳ [周期冷却] 等待 {cool_down} 秒后开启下一轮...")
                 safe_sleep(cool_down)
@@ -950,42 +954,46 @@ def control():
     global worker_thread
     d = request.form
 
-    def safe_int(val, default):
+    def safe_int(val, default=0):
         try:
-            return int(val) if val else default
+            s = str(val).strip()
+            return int(s) if s != "" else default
         except Exception:
             return default
 
     with status_lock:
         STATUS.update({
+            "enable_main_site": d.get("enable_main_site") == "true",
             "target_urls": d.get("urls", "").strip(),
+            "enable_stay": d.get("enable_stay") == "true",
+            "stay_min": safe_int(d.get("stay_min"), 0),
+            "stay_max": safe_int(d.get("stay_max"), 0),
+            "random_browse": d.get("browse") == "true",
+            "human_mouse": d.get("human_mouse") == "true",
+            "enable_inner": d.get("enable_inner") == "true",
+            "inner_page_prob": safe_int(d.get("inner_page_prob"), 0),
+            "max_inner_pages": safe_int(d.get("max_inner_pages"), 0),
+            "enable_click": d.get("enable_click") == "true",
+            "click_selector": d.get("click_selector", "").strip(),
+            "sub_click_selector": d.get("sub_click_selector", "").strip(),
+            "play_video": d.get("vid") == "true",
             "video_urls": d.get("video_urls", "").strip(),
-            "video_only": d.get("video_only") == "true",
+            "video_min": safe_int(d.get("video_min"), 0),
+            "video_max": safe_int(d.get("video_max"), 0),
             "load_mode": d.get("load_mode", "full"),
             "load_timeout": safe_int(d.get("load_timeout"), 45),
-            "render_wait": safe_int(d.get("render_wait"), 3),
-            "stay_min": safe_int(d.get("stay_min"), 8),
-            "stay_max": safe_int(d.get("stay_max"), 20),
-            "video_min": safe_int(d.get("video_min"), 30),
-            "video_max": safe_int(d.get("video_max"), 90),
-            "interval_min": safe_int(d.get("interval_min"), 4),
-            "interval_max": safe_int(d.get("interval_max"), 8),
+            "render_wait": safe_int(d.get("render_wait"), 0),
+            "interval_min": safe_int(d.get("interval_min"), 0),
+            "interval_max": safe_int(d.get("interval_max"), 0),
             "max_runs": safe_int(d.get("max_runs"), 0),
-            "inner_page_prob": safe_int(d.get("inner_page_prob"), 75),
-            "max_inner_pages": safe_int(d.get("max_inner_pages"), 2),
             "device_mode": d.get("device_mode", "mixed"),
+            "referer": d.get("referer", "").strip(),
             "route_mode": d.get("route_mode", "pool"),
             "tunnel_proxy": d.get("tunnel_proxy", "").strip(),
             "tor_new_ip": d.get("tor_new_ip") == "true",
             "strict_proxy": d.get("strict_proxy") == "true",
             "consume_proxy": d.get("consume_proxy") == "true",
-            "play_video": d.get("vid") == "true",
-            "click_selector": d.get("click_selector", "").strip(),
-            "sub_click_selector": d.get("sub_click_selector", "").strip(),
-            "referer": d.get("referer", "").strip(),
             "proxy_api": d.get("api", "").strip(),
-            "random_browse": d.get("browse") == "true",
-            "human_mouse": d.get("human_mouse") == "true",
             "block_ads": d.get("block_ads") == "true"
         })
     save_config()
@@ -1141,6 +1149,7 @@ body { background:#090909; color:#e0e0e0; font-family:monospace; margin:20px; }
 h1, h3 { color:#00ff66; margin-top:0; }
 .grid { display:grid; grid-template-columns: 1.15fr 0.85fr; gap:20px; }
 .card { background:#141414; border:1px solid #333; padding:16px; border-radius:6px; }
+.sub-card { background:#0e0e0e; border:1px solid #282828; padding:10px 12px; border-radius:4px; margin-bottom:10px; }
 .stats-bar { display:grid; grid-template-columns: repeat(4, 1fr); gap:12px; margin-bottom:16px; }
 .stat-box { background:#111; border:1px solid #2b2b2b; padding:10px 14px; border-radius:4px; }
 .stat-label { font-size:12px; color:#888; }
@@ -1154,15 +1163,16 @@ h1, h3 { color:#00ff66; margin-top:0; }
 input[type="text"], input[type="number"], select, textarea { background:#000; border:1px solid #444; color:#fff; padding:6px; width:98%; font-family:monospace; box-sizing:border-box; }
 .row-2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
 .row-3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; }
-textarea { height:68px; }
+textarea { height:60px; }
 .log-box { background:#020202; border:1px solid #ffaa00; height:320px; overflow-y:auto; padding:10px; font-size:12px; color:#ffaa00; white-space:pre-wrap; }
 .preview-box { background:#000; border:1px solid #333; min-height:180px; display:flex; align-items:center; justify-content:center; margin-top:10px; border-radius:4px; overflow:hidden; }
 .preview-box img { max-width:100%; max-height:260px; display:block; }
 .header-bar { display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #00ff66; padding-bottom:10px; margin-bottom:15px; }
+.sw { font-weight:bold; color:#00ff66; }
 </style></head>
 <body>
 <div class="header-bar">
-  <div><h1>矩阵自动化综合操盘控制台 (独立媒体全兼容版)</h1>
+  <div><h1>矩阵自动化综合操盘控制台 (全开关可控版)</h1>
   <span>● 状态: <span id="run-status" style="font-weight:bold;">检测中...</span> | 当前节点: <span id="current-node" style="color:#00ccff;">待命</span></span></div>
   <a href="/logout" style="color:#ff3333; font-weight:bold; text-decoration:none;">[安全登出]</a>
 </div>
@@ -1173,38 +1183,63 @@ textarea { height:68px; }
   <div class="stat-box"><div class="stat-label">异常/失败</div><div class="stat-val" id="stat-failed" style="color:#ff4444;">0</div></div>
 </div>
 <div class="grid">
-  <div class="card"><h3>操盘战略与独立视频播放配置</h3>
+  <div class="card"><h3>全功能模块化开关与配置（填0或不勾即跳过）</h3>
     <form id="control-form">
-      <p>普通网站 URL 列表 (每行一个随机轮询):<br><textarea name="urls">{{ cfg.target_urls }}</textarea></p>
-      <p style="color:#00ff66;">独立视频播放页 URL 列表 (每行一个，支持直接填播放页):<br>
-        <textarea name="video_urls" placeholder="https://example.com/play.html?id=1">{{ cfg.video_urls }}</textarea>
-      </p>
+
+      <div class="sub-card">
+        <label class="sw"><input type="checkbox" name="enable_main_site" value="true" {% if cfg.enable_main_site %}checked{% endif %}> [开关1] 启用普通网站浏览模块</label>
+        <p style="margin:6px 0;">普通网站 URL 列表 (每行一个，留空则不访问):<br><textarea name="urls">{{ cfg.target_urls }}</textarea></p>
+      </div>
+
+      <div class="sub-card">
+        <label class="sw"><input type="checkbox" name="enable_stay" value="true" {% if cfg.enable_stay %}checked{% endif %}> [开关2] 启用页面停留与阅读</label>
+        <label style="margin-left:12px;"><input type="checkbox" name="browse" value="true" {% if cfg.random_browse %}checked{% endif %}> [开关3] 分段滚动</label>
+        <label style="margin-left:12px;"><input type="checkbox" name="human_mouse" value="true" {% if cfg.human_mouse %}checked{% endif %}> [开关4] 鼠标轨迹</label>
+        <div class="row-3" style="margin-top:6px;">
+          <p style="margin:0;">页面停留 (最小/最大秒, 0=不留):<br><span style="display:flex; gap:4px;"><input type="number" name="stay_min" value="{{ cfg.stay_min }}"><input type="number" name="stay_max" value="{{ cfg.stay_max }}"></span></p>
+          <p style="margin:0;">加载超时上限 (秒):<br><input type="number" name="load_timeout" value="{{ cfg.load_timeout }}"></p>
+          <p style="margin:0;">加载后渲染缓冲 (秒, 0=不等):<br><input type="number" name="render_wait" value="{{ cfg.render_wait }}"></p>
+        </div>
+      </div>
+
+      <div class="sub-card">
+        <label class="sw"><input type="checkbox" name="enable_inner" value="true" {% if cfg.enable_inner %}checked{% endif %}> [开关5] 启用站内深度游览 (不勾或填0则不点击内页)</label>
+        <div class="row-2" style="margin-top:6px;">
+          <p style="margin:0;">内页深挖概率 (%, 0=跳过):<br><input type="number" name="inner_page_prob" value="{{ cfg.inner_page_prob }}"></p>
+          <p style="margin:0;">最多逛内页数 (0=跳过):<br><input type="number" name="max_inner_pages" value="{{ cfg.max_inner_pages }}"></p>
+        </div>
+      </div>
+
+      <div class="sub-card">
+        <label class="sw"><input type="checkbox" name="enable_click" value="true" {% if cfg.enable_click %}checked{% endif %}> [开关6] 启用链式点击流 (不勾或留空则不点击)</label>
+        <div class="row-2" style="margin-top:6px;">
+          <p style="margin:0;">一级点击目标 (CSS 或 coord:X,Y):<br><input type="text" name="click_selector" value="{{ cfg.click_selector }}" placeholder="例如: coord:960,1020"></p>
+          <p style="margin:0;">二级点击目标 (可选):<br><input type="text" name="sub_click_selector" value="{{ cfg.sub_click_selector }}"></p>
+        </div>
+      </div>
+
+      <div class="sub-card">
+        <label class="sw"><input type="checkbox" name="vid" value="true" {% if cfg.play_video %}checked{% endif %}> [开关7] 启用独立视频播放任务 (全播放器兼容)</label>
+        <p style="margin:6px 0;">独立视频播放页 URL 列表 (每行一个，留空则仅播放当前页):<br><textarea name="video_urls" placeholder="https://example.com/play.html?id=1">{{ cfg.video_urls }}</textarea></p>
+        <div class="row-3">
+          <p style="margin:0;">视频播放 (最小/最大秒, 0=不播):<br><span style="display:flex; gap:4px;"><input type="number" name="video_min" value="{{ cfg.video_min }}"><input type="number" name="video_max" value="{{ cfg.video_max }}"></span></p>
+          <p style="margin:0;">轮次冷却 (最小/最大秒, 0=无冷却):<br><span style="display:flex; gap:4px;"><input type="number" name="interval_min" value="{{ cfg.interval_min }}"><input type="number" name="interval_max" value="{{ cfg.interval_max }}"></span></p>
+          <p style="margin:0;">最大轮次 (0=无限):<br><input type="number" name="max_runs" value="{{ cfg.max_runs }}"></p>
+        </div>
+      </div>
+
       <div class="row-3">
         <p>页面加载策略:<br>
           <select name="load_mode">
-            <option value="full" {% if cfg.load_mode == 'full' %}selected{% endif %}>完全加载 (适合住宅代理)</option>
-            <option value="fast" {% if cfg.load_mode == 'fast' %}selected{% endif %}>极速加载 (适合Tor慢节点)</option>
+            <option value="full" {% if cfg.load_mode == 'full' %}selected{% endif %}>完全加载 (适合住宅)</option>
+            <option value="fast" {% if cfg.load_mode == 'fast' %}selected{% endif %}>极速加载 (适合Tor)</option>
           </select>
         </p>
-        <p>加载超时上限 (秒):<br><input type="number" name="load_timeout" value="{{ cfg.load_timeout }}"></p>
-        <p>加载后渲染缓冲 (秒):<br><input type="number" name="render_wait" value="{{ cfg.render_wait }}"></p>
-      </div>
-      <div class="row-3">
-        <p>页面浏览 (最小/最大秒):<br><span style="display:flex; gap:4px;"><input type="number" name="stay_min" value="{{ cfg.stay_min }}"><input type="number" name="stay_max" value="{{ cfg.stay_max }}"></span></p>
-        <p>视频播放 (最小/最大秒):<br><span style="display:flex; gap:4px;"><input type="number" name="video_min" value="{{ cfg.video_min }}"><input type="number" name="video_max" value="{{ cfg.video_max }}"></span></p>
-        <p>轮次冷却 (最小/最大秒):<br><span style="display:flex; gap:4px;"><input type="number" name="interval_min" value="{{ cfg.interval_min }}"><input type="number" name="interval_max" value="{{ cfg.interval_max }}"></span></p>
-      </div>
-      <div class="row-3">
-        <p>内页深挖概率 (%):<br><input type="number" name="inner_page_prob" value="{{ cfg.inner_page_prob }}"></p>
-        <p>最多逛内页数 (0=不跳):<br><input type="number" name="max_inner_pages" value="{{ cfg.max_inner_pages }}"></p>
-        <p>最大轮次 (0=无限):<br><input type="number" name="max_runs" value="{{ cfg.max_runs }}"></p>
-      </div>
-      <div class="row-2">
         <p>网络路由模式:<br>
           <select name="route_mode">
             <option value="pool" {% if cfg.route_mode == 'pool' %}selected{% endif %}>代理池 / 多 API 轮替</option>
-            <option value="tunnel" {% if cfg.route_mode == 'tunnel' %}selected{% endif %}>千万级住宅隧道网关 (单入口自动换IP)</option>
-            <option value="tor" {% if cfg.route_mode == 'tor' %}selected{% endif %}>Tor 匿名网络 (127.0.0.1:9050)</option>
+            <option value="tunnel" {% if cfg.route_mode == 'tunnel' %}selected{% endif %}>千万级住宅隧道网关</option>
+            <option value="tor" {% if cfg.route_mode == 'tor' %}selected{% endif %}>Tor 匿名网络</option>
             <option value="direct" {% if cfg.route_mode == 'direct' %}selected{% endif %}>本机直连</option>
           </select>
         </p>
@@ -1216,21 +1251,15 @@ textarea { height:68px; }
           </select>
         </p>
       </div>
-      <p>住宅隧道网关地址 (选择“千万级住宅隧道网关”时必填):<br><input type="text" name="tunnel_proxy" value="{{ cfg.tunnel_proxy }}" placeholder="例如: http://user:pass@gate.provider.com:7000"></p>
       <div class="row-2">
-        <p>一级点击目标 (CSS 或 coord:X,Y):<br><input type="text" name="click_selector" value="{{ cfg.click_selector }}" placeholder="可选: coord:960,1020"></p>
-        <p>二级点击目标 (可选):<br><input type="text" name="sub_click_selector" value="{{ cfg.sub_click_selector }}"></p>
+        <p>住宅隧道网关地址:<br><input type="text" name="tunnel_proxy" value="{{ cfg.tunnel_proxy }}" placeholder="http://user:pass@gate.provider.com:7000"></p>
+        <p>自定义 Referer (留空自动分流):<br><input type="text" name="referer" value="{{ cfg.referer }}" placeholder="https://www.google.com"></p>
       </div>
-      <p>自定义 Referer (留空自动权重分流):<br><input type="text" name="referer" value="{{ cfg.referer }}" placeholder="https://www.google.com"></p>
-      <p>拟人行为与任务开关：<br>
-        <label style="color:#00ff66; font-weight:bold;"><input type="checkbox" name="video_only" value="true" {% if cfg.video_only %}checked{% endif %}> 仅运行独立视频播放任务 (跳过普通网页浏览)</label><br>
-        <label style="color:#00ff66;"><input type="checkbox" name="vid" value="true" {% if cfg.play_video %}checked{% endif %}> 启用全播放器自动起播与时长控制</label><br>
-        <label><input type="checkbox" name="browse" value="true" {% if cfg.random_browse %}checked{% endif %}> 启用分段平滑滚动与回看阅读</label><br>
-        <label><input type="checkbox" name="human_mouse" value="true" {% if cfg.human_mouse %}checked{% endif %}> 启用随机鼠标轨迹与元素悬停</label><br>
-        <label style="color:#ffaa00;"><input type="checkbox" name="block_ads" value="true" {% if cfg.block_ads %}checked{% endif %}> 开启高能耗第三方脚本拦截</label><br>
-        <label><input type="checkbox" name="tor_new_ip" value="true" {% if cfg.tor_new_ip %}checked{% endif %}> Tor 模式下每轮自动切换新出口 IP</label><br>
-        <label style="color:#00ccff;"><input type="checkbox" name="strict_proxy" value="true" {% if cfg.strict_proxy %}checked{% endif %}> 代理池模式下无可用节点时不回退直连</label><br>
-        <label style="color:#00ccff;"><input type="checkbox" name="consume_proxy" value="true" {% if cfg.consume_proxy %}checked{% endif %}> 代理用后即焚 (每轮用完移除，少于3个自动拉取新IP)</label>
+      <p>
+        <label style="color:#ffaa00;"><input type="checkbox" name="block_ads" value="true" {% if cfg.block_ads %}checked{% endif %}> [开关8] 开启高能耗第三方脚本拦截</label><br>
+        <label><input type="checkbox" name="tor_new_ip" value="true" {% if cfg.tor_new_ip %}checked{% endif %}> [开关9] Tor 模式每轮自动切换新出口 IP</label><br>
+        <label style="color:#00ccff;"><input type="checkbox" name="strict_proxy" value="true" {% if cfg.strict_proxy %}checked{% endif %}> [开关10] 代理池无可用节点时不回退直连</label><br>
+        <label style="color:#00ccff;"><input type="checkbox" name="consume_proxy" value="true" {% if cfg.consume_proxy %}checked{% endif %}> [开关11] 代理用后即焚 (少于3个自动拉新)</label>
       </p>
       <button type="button" class="btn" onclick="sendControl('start')">启动 / 应用配置</button>
       <button type="button" class="btn btn-stop" onclick="sendControl('stop')">紧急全面停滞</button>
@@ -1327,7 +1356,7 @@ except Exception as e:
     print(f"👉 你可以手动运行启动: {VENV_PY} {BASE_DIR}/app.py")
 
 print("==================================================")
-print("🎉 恭喜！矩阵自动化操盘系统（独立媒体全兼容版）已安装成功！")
+print("🎉 恭喜！矩阵自动化操盘系统（全开关可控版）已安装成功！")
 print("📌 访问地址: http://<你的服务器IP>:5000")
 print("🔑 默认登录密码: admin888")
 print("==================================================")
