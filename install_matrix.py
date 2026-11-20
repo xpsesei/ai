@@ -81,7 +81,8 @@ DEFAULT_STATUS = {
     "inner_page_prob": 0,
     "max_inner_pages": 0,
     "enable_click": False,
-    "click_prob": 100,
+    "click_prob": 30,
+    "inner_click_prob": 80,
     "popup_prob": 50,
     "click_selector": "",
     "sub_click_selector": "",
@@ -113,18 +114,27 @@ DEFAULT_STATUS = {
 STATUS = json.loads(json.dumps(DEFAULT_STATUS))
 
 DESKTOP_PROFILES = [
-    {"name": "Win10_Chrome_1080P", "type": "desktop", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36", "w": 1920, "h": 1080, "touch": False, "scale": 1},
-    {"name": "Win11_Edge_Laptop", "type": "desktop", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36 Edg/122.0.0.0", "w": 1366, "h": 768, "touch": False, "scale": 1},
-    {"name": "MacOS_Safari_Retina", "type": "desktop", "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Safari/605.1.15", "w": 1440, "h": 900, "touch": False, "scale": 2},
-    {"name": "MacOS_Chrome_2K", "type": "desktop", "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36", "w": 2560, "h": 1440, "touch": False, "scale": 2},
-    {"name": "Linux_Firefox_Desktop", "type": "desktop", "ua": "Mozilla/5.0 (X11; Linux x86_64; rv:123.0) Gecko/20100101 Firefox/123.0", "w": 1920, "h": 1080, "touch": False, "scale": 1}
+    {"name": "Win11_Chrome158_1080P", "type": "desktop", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36", "w": 1920, "h": 1080, "touch": False, "scale": 1},
+    {"name": "Win11_Edge158_Laptop", "type": "desktop", "ua": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36 Edg/158.0.0.0", "w": 1366, "h": 768, "touch": False, "scale": 1},
+    {"name": "macOS_Safari27_Retina", "type": "desktop", "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Safari/605.1.15", "w": 1440, "h": 900, "touch": False, "scale": 2},
+    {"name": "macOS_Chrome158_2K", "type": "desktop", "ua": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Safari/537.36", "w": 2560, "h": 1440, "touch": False, "scale": 2},
+    {"name": "Linux_Firefox160_Desktop", "type": "desktop", "ua": "Mozilla/5.0 (X11; Linux x86_64; rv:160.0) Gecko/20100101 Firefox/160.0", "w": 1920, "h": 1080, "touch": False, "scale": 1}
 ]
 
 MOBILE_PROFILES = [
-    {"name": "iPhone15_iOS_Safari", "type": "mobile", "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Mobile/15E148 Safari/604.1", "w": 393, "h": 852, "touch": True, "scale": 3},
-    {"name": "Android_Pixel8_Chrome", "type": "mobile", "ua": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36", "w": 412, "h": 915, "touch": True, "scale": 2.6},
-    {"name": "Samsung_S24_Chrome", "type": "mobile", "ua": "Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36", "w": 360, "h": 780, "touch": True, "scale": 3},
-    {"name": "iPadPro_Safari_Tablet", "type": "mobile", "ua": "Mozilla/5.0 (iPad; CPU OS 17_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Mobile/15E148 Safari/604.1", "w": 1024, "h": 1366, "touch": True, "scale": 2}
+    {"name": "iPhone18Pro_iOS27_Safari", "type": "mobile", "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 27_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Mobile/15E148 Safari/604.1", "w": 402, "h": 874, "touch": True, "scale": 3},
+    {"name": "iPhone17Pro_iOS27_Safari", "type": "mobile", "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 27_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.0 Mobile/15E148 Safari/604.1", "w": 393, "h": 852, "touch": True, "scale": 3},
+    {"name": "iPadPro_iPadOS27_Safari", "type": "mobile", "ua": "Mozilla/5.0 (iPad; CPU OS 27_2 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/27.2 Mobile/15E148 Safari/604.1", "w": 1024, "h": 1366, "touch": True, "scale": 2},
+    {"name": "Huawei_Pura90sProMax_Browser", "type": "mobile", "ua": "Mozilla/5.0 (Linux; HarmonyOS 6.0; HUAWEI Pura 90s Pro Max) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 HuaweiBrowser/16.0.0.300 Mobile Safari/537.36", "w": 412, "h": 915, "touch": True, "scale": 3},
+    {"name": "Huawei_Mate80Pro_Browser", "type": "mobile", "ua": "Mozilla/5.0 (Linux; HarmonyOS 6.0; HUAWEI Mate 80 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/156.0.0.0 HuaweiBrowser/16.0.0.300 Mobile Safari/537.36", "w": 412, "h": 915, "touch": True, "scale": 3},
+    {"name": "Xiaomi_17Ultra_Chrome158", "type": "mobile", "ua": "Mozilla/5.0 (Linux; Android 16; Xiaomi 17 Ultra) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Mobile Safari/537.36", "w": 412, "h": 915, "touch": True, "scale": 3},
+    {"name": "Xiaomi_17ProMax_MiuiBrowser", "type": "mobile", "ua": "Mozilla/5.0 (Linux; Android 16; Xiaomi 17 Pro Max) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Mobile Safari/537.36", "w": 412, "h": 915, "touch": True, "scale": 3},
+    {"name": "Samsung_S26Ultra_Chrome158", "type": "mobile", "ua": "Mozilla/5.0 (Linux; Android 16; SM-S948B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Mobile Safari/537.36", "w": 412, "h": 915, "touch": True, "scale": 3},
+    {"name": "Google_Pixel11Pro_Chrome158", "type": "mobile", "ua": "Mozilla/5.0 (Linux; Android 17; Pixel 11 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Mobile Safari/537.36", "w": 412, "h": 915, "touch": True, "scale": 2.6},
+    {"name": "Nothing_Phone4aPro_Chrome158", "type": "mobile", "ua": "Mozilla/5.0 (Linux; Android 16; Nothing Phone (4a) Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Mobile Safari/537.36", "w": 412, "h": 915, "touch": True, "scale": 2.6},
+    {"name": "OnePlus_N6_Chrome158", "type": "mobile", "ua": "Mozilla/5.0 (Linux; Android 16; OnePlus N6) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Mobile Safari/537.36", "w": 412, "h": 915, "touch": True, "scale": 2.6},
+    {"name": "RedMagic_11SPro_Chrome158", "type": "mobile", "ua": "Mozilla/5.0 (Linux; Android 16; NX789J) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Mobile Safari/537.36", "w": 412, "h": 915, "touch": True, "scale": 2.6},
+    {"name": "Motorola_Razr2026_Chrome158", "type": "mobile", "ua": "Mozilla/5.0 (Linux; Android 16; motorola razr 2026) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/158.0.0.0 Mobile Safari/537.36", "w": 412, "h": 915, "touch": True, "scale": 2.6}
 ]
 
 AD_BLOCK_KEYWORDS = [
@@ -135,11 +145,11 @@ AD_BLOCK_KEYWORDS = [
 PERSIST_KEYS = [
     "enable_main_site", "target_urls", "enable_stay", "stay_min", "stay_max",
     "random_browse", "human_mouse", "enable_inner", "inner_page_prob", "max_inner_pages",
-    "enable_click", "click_prob", "popup_prob", "click_selector", "sub_click_selector",
-    "play_video", "video_urls", "video_min", "video_max", "load_mode", "load_timeout",
-    "render_wait", "interval_min", "interval_max", "max_runs", "device_mode", "referer",
-    "route_mode", "tunnel_proxy", "tor_new_ip", "strict_proxy", "consume_proxy",
-    "proxy_api", "proxy_pool", "block_ads"
+    "enable_click", "click_prob", "inner_click_prob", "popup_prob", "click_selector",
+    "sub_click_selector", "play_video", "video_urls", "video_min", "video_max",
+    "load_mode", "load_timeout", "render_wait", "interval_min", "interval_max",
+    "max_runs", "device_mode", "referer", "route_mode", "tunnel_proxy",
+    "tor_new_ip", "strict_proxy", "consume_proxy", "proxy_api", "proxy_pool", "block_ads"
 ]
 
 
@@ -217,7 +227,7 @@ def parse_and_scale_coord(selector_str, target_w, target_h, base_w=1920, base_h=
         if len(coords) == 2:
             orig_x, orig_y = coords
             scaled_x = max(1, min(target_w - 1, int((orig_x / base_w) * target_w)))
-            scaled_y = max(1, min(target_h - 1, int((orig_y / base_h) * target_h)))
+            scaled_y = max(1, int((orig_y / base_h) * target_h))
             return True, scaled_x, scaled_y
     return False, 0, 0
 
@@ -341,7 +351,6 @@ def renew_tor_circuit():
 
 
 def handle_extra_popups(context, main_page, popup_prob):
-    """按弹窗比例处理意外弹出的新窗口"""
     pages = list(context.pages)
     if len(pages) <= 1:
         return main_page
@@ -566,8 +575,15 @@ def perform_click(page, context, selector_str, profile, popup_prob=50, step_labe
         with context.expect_page(timeout=8000) as popup_info:
             if is_coord:
                 mode_tag = "触控" if profile.get("touch", False) else "鼠标"
+                if cy >= profile["h"]:
+                    scroll_to = max(0, cy - profile["h"] // 2)
+                    page.evaluate(f"window.scrollTo(0, {scroll_to})")
+                    safe_sleep(0.5)
+                    actual_y = max(5, min(profile["h"] - 5, cy - int(page.evaluate("window.scrollY"))))
+                else:
+                    actual_y = cy
                 add_log(f"🖱️ [{step_label}] {mode_tag}坐标 -> X:{cx}, Y:{cy}")
-                smart_tap_or_click(page, profile, cx, cy)
+                smart_tap_or_click(page, profile, cx, actual_y)
             else:
                 add_log(f"🖱️ [{step_label}] 选择器 -> [{selector_str}]")
                 el = page.locator(selector_str).first
@@ -634,7 +650,8 @@ def automation_worker():
                 max_inner = max(0, int(STATUS["max_inner_pages"]))
 
                 enable_click = STATUS.get("enable_click", False)
-                click_prob = max(0, min(100, int(STATUS.get("click_prob", 100))))
+                click_prob = max(0, min(100, int(STATUS.get("click_prob", 30))))
+                inner_click_prob = max(0, min(100, int(STATUS.get("inner_click_prob", 80))))
                 popup_prob = max(0, min(100, int(STATUS.get("popup_prob", 50))))
                 click_selector = STATUS["click_selector"]
                 sub_click_selector = STATUS["sub_click_selector"]
@@ -836,6 +853,13 @@ def automation_worker():
                             main_stay = random.randint(stay_min, stay_max)
                             simulate_human_browsing(active_page, profile, main_stay, do_scroll=random_browse, do_mouse=human_mouse)
 
+                        if enable_click and click_selector and click_prob > 0 and random.randint(1, 100) <= click_prob and not stop_event.is_set():
+                            clicked_page = perform_click(active_page, context, click_selector, profile, popup_prob=popup_prob, step_label="首页一级点击")
+                            if sub_click_selector and not stop_event.is_set():
+                                perform_click(clicked_page, context, sub_click_selector, profile, popup_prob=popup_prob, step_label="首页二级点击")
+                            if clicked_page != page:
+                                active_page = page
+
                         if enable_inner and inner_prob > 0 and max_inner > 0 and random.randint(1, 100) <= inner_prob and not stop_event.is_set():
                             pages_to_visit = random.randint(1, max_inner)
                             main_domain = urlparse(target_url).netloc
@@ -885,17 +909,17 @@ def automation_worker():
                                     if enable_stay and stay_max > 0:
                                         inner_stay = random.randint(max(1, stay_min // 2), max(1, stay_max // 2))
                                         simulate_human_browsing(active_page, profile, inner_stay, do_scroll=random_browse, do_mouse=human_mouse)
+
+                                    if enable_click and click_selector and inner_click_prob > 0 and random.randint(1, 100) <= inner_click_prob and not stop_event.is_set():
+                                        clicked_inner = perform_click(active_page, context, click_selector, profile, popup_prob=popup_prob, step_label=f"内页{idx+1}一级点击")
+                                        if enable_stay and stay_max > 0:
+                                            simulate_human_browsing(clicked_inner, profile, random.randint(2, 5), do_scroll=random_browse, do_mouse=human_mouse)
+                                        if sub_click_selector and not stop_event.is_set():
+                                            clicked_sub = perform_click(clicked_inner, context, sub_click_selector, profile, popup_prob=popup_prob, step_label=f"内页{idx+1}二级点击")
+                                            safe_sleep(1.5)
+                                            capture_preview(clicked_sub)
                                 except Exception:
                                     break
-
-                        if enable_click and click_selector and click_prob > 0 and random.randint(1, 100) <= click_prob and not stop_event.is_set():
-                            active_page = perform_click(active_page, context, click_selector, profile, popup_prob=popup_prob, step_label="一级点击")
-                            if enable_stay and stay_max > 0:
-                                simulate_human_browsing(active_page, profile, random.randint(3, 6), do_scroll=random_browse, do_mouse=human_mouse)
-                            if sub_click_selector and not stop_event.is_set():
-                                active_page = perform_click(active_page, context, sub_click_selector, profile, popup_prob=popup_prob, step_label="二级点击")
-                                safe_sleep(2.0)
-                                capture_preview(active_page)
 
                     if has_video_task and not stop_event.is_set():
                         if video_list:
@@ -1026,12 +1050,13 @@ def pick_page():
             )
             context = browser.new_context(viewport={"width": vw, "height": vh}, user_agent=ua, has_touch=(view_type == "mobile"))
             page = context.new_page()
-            page.goto(target_url, wait_until="domcontentloaded", timeout=35000)
+            page.goto(target_url, wait_until="load", timeout=40000)
             try:
-                page.wait_for_load_state("networkidle", timeout=6000)
+                page.wait_for_load_state("networkidle", timeout=8000)
             except Exception:
                 pass
-            safe_sleep(1.5)
+            safe_sleep(2.5)
+            doc_h = int(page.evaluate("Math.max(document.body.scrollHeight, document.documentElement.scrollHeight, 1080)"))
 
             elements = page.evaluate(f"""() => {{
                 function getSelector(el) {{
@@ -1065,10 +1090,10 @@ def pick_page():
                 const nodes = document.querySelectorAll('a, button, input, video, iframe, img, div, span');
                 for (const el of nodes) {{
                     const r = el.getBoundingClientRect();
-                    if (r.width >= 12 && r.height >= 12 && r.right > 0 && r.bottom > 0 && r.left < {vw} && r.top < {vh}) {{
+                    if (r.width >= 12 && r.height >= 12 && r.right > 0 && r.bottom > 0 && r.left < {vw}) {{
                         list.push({{
                             x: Math.round(r.left),
-                            y: Math.round(r.top),
+                            y: Math.round(r.top + window.scrollY),
                             w: Math.round(r.width),
                             h: Math.round(r.height),
                             area: Math.round(r.width * r.height),
@@ -1078,17 +1103,17 @@ def pick_page():
                     }}
                 }}
                 list.sort((a, b) => a.area - b.area);
-                return list.slice(0, 350);
+                return list.slice(0, 400);
             }}""")
 
-            img_bytes = page.screenshot(type="png")
+            img_bytes = page.screenshot(type="png", full_page=True)
             b64 = base64.b64encode(img_bytes).decode("ascii")
             return jsonify({
                 "status": "ok",
                 "image": "data:image/png;base64," + b64,
                 "elements": elements,
                 "vw": vw,
-                "vh": vh
+                "vh": doc_h
             })
     except Exception as e:
         return jsonify({"status": "failed", "msg": f"加载页面失败: {str(e)[:80]}"})
@@ -1127,6 +1152,7 @@ def control():
             "max_inner_pages": safe_int(d.get("max_inner_pages"), 0),
             "enable_click": d.get("enable_click") == "true",
             "click_prob": safe_int(d.get("click_prob"), 0),
+            "inner_click_prob": safe_int(d.get("inner_click_prob"), 0),
             "popup_prob": safe_int(d.get("popup_prob"), 0),
             "click_selector": d.get("click_selector", "").strip(),
             "sub_click_selector": d.get("sub_click_selector", "").strip(),
@@ -1369,10 +1395,11 @@ textarea { height:60px; }
       </div>
 
       <div class="sub-card">
-        <label class="sw"><input type="checkbox" id="chk-enable-click" name="enable_click" value="true" {% if cfg.enable_click %}checked{% endif %}> [开关6] 启用链式点击流 (支持可视化网页点选)</label>
-        <div class="row-2" style="margin-top:6px;">
-          <p style="margin:0;">点击触发比例 (%, 0=不点):<br><input type="number" name="click_prob" value="{{ cfg.click_prob }}"></p>
-          <p style="margin:0;">弹窗保留比例 (%, 0=自动关弹窗):<br><input type="number" name="popup_prob" value="{{ cfg.popup_prob }}"></p>
+        <label class="sw"><input type="checkbox" id="chk-enable-click" name="enable_click" value="true" {% if cfg.enable_click %}checked{% endif %}> [开关6] 启用链式点击流 (支持可视化整页点选)</label>
+        <div class="row-3" style="margin-top:6px;">
+          <p style="margin:0;">首页点击比例 (%, 0=不点):<br><input type="number" name="click_prob" value="{{ cfg.click_prob }}"></p>
+          <p style="margin:0;">内页点击比例 (%, 0=不点):<br><input type="number" name="inner_click_prob" value="{{ cfg.inner_click_prob }}"></p>
+          <p style="margin:0;">弹窗保留比例 (%, 0=自动关):<br><input type="number" name="popup_prob" value="{{ cfg.popup_prob }}"></p>
         </div>
         <div class="row-2" style="margin-top:6px;">
           <p style="margin:0;">一级点击目标: <button type="button" class="btn btn-warn" style="padding:2px 8px; font-size:11px;" onclick="openPicker('click_selector')">🎯 网页点选</button><br><input type="text" id="input-click-selector" name="click_selector" value="{{ cfg.click_selector }}" placeholder="CSS 选择器或 coord:X,Y"></p>
@@ -1407,9 +1434,9 @@ textarea { height:60px; }
         </p>
         <p>设备指纹模式:<br>
           <select name="device_mode">
-            <option value="mixed" {% if cfg.device_mode == 'mixed' %}selected{% endif %}>PC+移动全融合</option>
+            <option value="mixed" {% if cfg.device_mode == 'mixed' %}selected{% endif %}>PC+移动全融合(2026最新)</option>
             <option value="desktop" {% if cfg.device_mode == 'desktop' %}selected{% endif %}>仅桌面端</option>
-            <option value="mobile" {% if cfg.device_mode == 'mobile' %}selected{% endif %}>仅移动端</option>
+            <option value="mobile" {% if cfg.device_mode == 'mobile' %}selected{% endif %}>仅移动端(含华为/小米/小众)</option>
           </select>
         </p>
       </div>
@@ -1448,14 +1475,14 @@ textarea { height:60px; }
 <div id="picker-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:9999; padding:15px; overflow:auto;">
   <div style="max-width:1280px; margin:0 auto; background:#141414; border:1px solid #00ff66; border-radius:6px; padding:15px;">
     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
-      <h3 style="margin:0;">🎯 可视化网页点击目标拾取器 (PC/移动双视图)</h3>
+      <h3 style="margin:0;">🎯 可视化网页点击目标拾取器 (整页长图 + PC/移动双视图)</h3>
       <button type="button" class="btn btn-stop" onclick="closePicker()">关闭</button>
     </div>
     <div style="display:flex; gap:8px; margin-bottom:10px; align-items:center; flex-wrap:wrap;">
       <input type="text" id="picker-url" placeholder="输入要打开的网页 URL" style="flex:1; min-width:220px;">
       <select id="picker-view" style="width:150px;">
-        <option value="desktop">PC 视图 (1920×1080)</option>
-        <option value="mobile">手机视图 (393×852)</option>
+        <option value="desktop">PC 视图 (1920宽)</option>
+        <option value="mobile">手机视图 (393宽)</option>
       </select>
       <select id="picker-mode" style="width:210px;">
         <option value="css">优先 CSS 选择器 (PC/手机通用)</option>
@@ -1463,7 +1490,7 @@ textarea { height:60px; }
       </select>
       <button type="button" class="btn" onclick="loadPickerPage()">加载网页画面</button>
     </div>
-    <div id="picker-status" style="color:#ffaa00; font-size:12px; margin-bottom:8px;">提示：点击“加载网页画面”后，直接在下方网页截图上点击你要操作的位置即可自动填入。</div>
+    <div id="picker-status" style="color:#ffaa00; font-size:12px; margin-bottom:8px;">提示：点击“加载网页画面”后，可上下滚动整页截图并点击任意目标位置。</div>
     <div style="position:relative; border:1px solid #333; background:#000; text-align:center;">
       <img id="picker-img" src="" onclick="onPickerClick(event)" style="max-width:100%; cursor:crosshair; display:none; margin:0 auto;">
     </div>
@@ -1536,7 +1563,7 @@ function loadPickerPage() {
   if (!url) { alert('请输入网页 URL'); return; }
   const st = document.getElementById('picker-status');
   const img = document.getElementById('picker-img');
-  st.innerText = '⏳ 正在通过无头浏览器渲染网页画面，请稍候...';
+  st.innerText = '⏳ 正在通过无头浏览器渲染整页画面，请稍候...';
   img.style.display = 'none';
 
   const fd = new FormData();
@@ -1551,7 +1578,7 @@ function loadPickerPage() {
         pickerVH = d.vh || 1080;
         img.src = d.image;
         img.style.display = 'block';
-        st.innerText = '✅ 画面已就绪！请直接点击下方网页中你想让程序操作的位置。';
+        st.innerText = '✅ 整页画面已就绪！可上下滚动并点击你想让程序操作的位置。';
       } else {
         st.innerText = '❌ ' + (d.msg || '加载失败');
       }
@@ -1575,7 +1602,7 @@ function onPickerClick(e) {
 
   const mode = document.getElementById('picker-mode').value;
   const scaledX = Math.round((realX / pickerVW) * 1920);
-  const scaledY = Math.round((realY / pickerVH) * 1080);
+  const scaledY = Math.round((realY / pickerVW) * 1920);
   let finalVal = 'coord:' + scaledX + ',' + scaledY;
   if (mode === 'css' && matched && matched.selector) {
     finalVal = matched.selector;
