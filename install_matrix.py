@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 print("==================================================")
-print(" Matrix 自动化综合操盘系统 - 媒体与代理增强版 ")
+print(" Matrix 自动化综合操盘系统 - GitHub 终极发布版 ")
 print("==================================================")
 
 BASE_DIR = "/opt/auto_browser_system"
@@ -42,6 +42,7 @@ import os
 import random
 import re
 import secrets
+import subprocess
 import threading
 import time
 from functools import wraps
@@ -69,6 +70,9 @@ proxy_fail_counts = {}
 DEFAULT_STATUS = {
     "is_running": False,
     "target_urls": "https://example.com",
+    "load_mode": "full",
+    "load_timeout": 45,
+    "render_wait": 3,
     "stay_min": 8,
     "stay_max": 20,
     "video_min": 30,
@@ -83,7 +87,9 @@ DEFAULT_STATUS = {
     "referer": "",
     "random_browse": True,
     "human_mouse": True,
-    "use_tor": False,
+    "route_mode": "pool",
+    "tunnel_proxy": "",
+    "tor_new_ip": True,
     "strict_proxy": False,
     "consume_proxy": False,
     "proxy_api": "",
@@ -93,7 +99,7 @@ DEFAULT_STATUS = {
     "block_ads": True,
     "current_node": "待命",
     "stats": {"total": 0, "success": 0, "failed": 0},
-    "logs": ["[系统提示] 矩阵综合操盘主板已初始化（媒体与代理增强版），等待下达指令..."]
+    "logs": ["[系统提示] 矩阵综合操盘主板已初始化（GitHub 终极发布版），等待下达指令..."]
 }
 
 STATUS = json.loads(json.dumps(DEFAULT_STATUS))
@@ -117,11 +123,12 @@ AD_BLOCK_KEYWORDS = [
 ]
 
 PERSIST_KEYS = [
-    "target_urls", "stay_min", "stay_max", "video_min", "video_max",
-    "interval_min", "interval_max", "max_runs", "inner_page_prob", "max_inner_pages",
-    "device_mode", "play_video", "referer", "random_browse", "human_mouse",
-    "use_tor", "strict_proxy", "consume_proxy", "proxy_api", "proxy_pool",
-    "click_selector", "sub_click_selector", "block_ads"
+    "target_urls", "load_mode", "load_timeout", "render_wait", "stay_min", "stay_max",
+    "video_min", "video_max", "interval_min", "interval_max", "max_runs",
+    "inner_page_prob", "max_inner_pages", "device_mode", "play_video", "referer",
+    "random_browse", "human_mouse", "route_mode", "tunnel_proxy", "tor_new_ip",
+    "strict_proxy", "consume_proxy", "proxy_api", "proxy_pool", "click_selector",
+    "sub_click_selector", "block_ads"
 ]
 
 
@@ -205,7 +212,7 @@ def parse_and_scale_coord(selector_str, target_w, target_h, base_w=1920, base_h=
 
 
 def normalize_proxy_entry(raw):
-    """统一标准化各种代理格式为 [scheme://][user:pass@]ip:port"""
+    """统一标准化代理格式，支持纯 IP 与域名隧道网关"""
     s = raw.strip().strip('"\',;')
     if not s:
         return None
@@ -214,19 +221,19 @@ def normalize_proxy_entry(raw):
         scheme, s = s.split("://", 1)
         scheme = scheme.lower() + "://"
 
-    # 兼容 ip:port:user:pass 四段式
     parts = s.split(":")
     if "@" not in s and len(parts) == 4 and parts[1].isdigit():
         ip, port, user, pwd = parts
         s = f"{user}:{pwd}@{ip}:{port}"
 
-    if not re.search(r'\d{1,3}(?:\.\d{1,3}){3}:\d{2,5}$', s):
+    host_port = s.split("@", 1)[-1]
+    if not re.match(r'^(?:[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+|\d{1,3}(?:\.\d{1,3}){3}):\d{2,5}$', host_port):
         return None
     return f"{scheme}{s}"
 
 
 def extract_proxies_from_text(raw_text):
-    """万能代理提取器：同时兼容 JSON、逗号/空格分隔、换行文本与四段式认证"""
+    """万能代理提取器：同时兼容 JSON、逗号/空格/换行文本、域名网关与四段式"""
     results = []
     seen = set()
 
@@ -236,7 +243,8 @@ def extract_proxies_from_text(raw_text):
             seen.add(norm)
             results.append(norm)
 
-    # 1. 尝试 JSON 递归提取
+    pattern = r'(?:(?:https?|socks[45])://)?(?:[^\s:@/,"\';]+:[^\s:@/,"\';]+@)?(?:[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+|\d{1,3}(?:\.\d{1,3}){3}):\d{2,5}(?::[^\s:,"\';]+:[^\s:,"\';]+)?'
+
     try:
         parsed = json.loads(raw_text)
 
@@ -259,15 +267,13 @@ def extract_proxies_from_text(raw_text):
                 for item in obj:
                     _walk(item)
             elif isinstance(obj, str):
-                for m in re.findall(r'(?:(?:https?|socks[45])://)?(?:[^\s:@/,;]+:[^\s:@/,;]+@)?\d{1,3}(?:\.\d{1,3}){3}:\d{2,5}(?::[^\s:,;]+:[^\s:,;]+)?', obj):
+                for m in re.findall(pattern, obj):
                     _add(m)
 
         _walk(parsed)
     except Exception:
         pass
 
-    # 2. 正则全文兜底扫描
-    pattern = r'(?:(?:https?|socks[45])://)?(?:[^\s:@/,"\';]+:[^\s:@/,"\';]+@)?\d{1,3}(?:\.\d{1,3}){3}:\d{2,5}(?::[^\s:,"\';]+:[^\s:,"\';]+)?'
     for match in re.findall(pattern, raw_text):
         _add(match)
 
@@ -300,11 +306,20 @@ def parse_proxy(proxy_str):
 
 def validate_single_proxy(cand):
     pw_proxy, req_proxies = parse_proxy(cand)
-    res = requests.get("http://ip-api.com/json/?lang=zh-CN", proxies=req_proxies, timeout=5)
+    res = requests.get("http://ip-api.com/json/?lang=zh-CN", proxies=req_proxies, timeout=6)
     if res.status_code == 200:
         data = res.json()
-        return True, pw_proxy, data.get("country", "未知国家")
-    return False, None, None
+        return True, pw_proxy, data.get("country", "未知国家"), data.get("query", "")
+    return False, None, None, ""
+
+
+def renew_tor_circuit():
+    try:
+        subprocess.run(["systemctl", "reload", "tor"], check=False, timeout=5)
+        add_log("🔄 [Tor换IP] 已发送重建电路指令，切换新出口 IP...")
+        safe_sleep(2.0)
+    except Exception:
+        pass
 
 
 def simulate_human_browsing(page, profile, stay_seconds, do_scroll=True, do_mouse=True):
@@ -372,7 +387,6 @@ def simulate_video_playback(page, profile, play_seconds):
     ]
 
     started = False
-    # 1. 尝试在主页面与所有 iframe 中查找并触发播放
     frames = [page] + [f for f in page.frames if f != page.main_frame]
     for target_frame in frames:
         if stop_event.is_set():
@@ -404,7 +418,6 @@ def simulate_video_playback(page, profile, play_seconds):
                     page.mouse.click(cx, cy)
                     started = True
                     add_log("▶️ [视频起播] 模拟点击视频画面中央")
-                # 检查是否处于暂停，必要时静音起播兜底
                 is_paused = target_frame.evaluate("""() => {
                     const v = document.querySelector('video');
                     if (!v) return false;
@@ -428,7 +441,6 @@ def simulate_video_playback(page, profile, play_seconds):
         if elapsed - last_preview >= 10:
             last_preview = elapsed
             capture_preview(page)
-            # 偶尔轻微移动鼠标保持活跃状态
             if not profile.get("touch", False) and random.random() < 0.5:
                 try:
                     page.mouse.move(
@@ -440,7 +452,6 @@ def simulate_video_playback(page, profile, play_seconds):
                     pass
         safe_sleep(min(2.0, max(0.2, play_seconds - (time.time() - start_ts))))
 
-    # 读取最终播放进度日志
     for target_frame in frames:
         try:
             cur_t = target_frame.evaluate("""() => {
@@ -505,6 +516,9 @@ def automation_worker():
             with status_lock:
                 raw_urls = STATUS["target_urls"]
                 url_list = [u.strip() for u in raw_urls.splitlines() if u.strip()]
+                load_mode = STATUS.get("load_mode", "full")
+                load_timeout_ms = max(10, int(STATUS.get("load_timeout", 45))) * 1000
+                render_wait = max(0, int(STATUS.get("render_wait", 3)))
                 stay_min = max(2, int(STATUS["stay_min"]))
                 stay_max = max(stay_min, int(STATUS["stay_max"]))
                 video_min = max(5, int(STATUS["video_min"]))
@@ -515,7 +529,9 @@ def automation_worker():
                 inner_prob = max(0, min(100, int(STATUS["inner_page_prob"])))
                 max_inner = max(0, int(STATUS["max_inner_pages"]))
                 device_mode = STATUS["device_mode"]
-                use_tor = STATUS["use_tor"]
+                route_mode = STATUS.get("route_mode", "pool")
+                tunnel_proxy = STATUS.get("tunnel_proxy", "").strip()
+                tor_new_ip = STATUS.get("tor_new_ip", True)
                 strict_proxy = STATUS["strict_proxy"]
                 consume_proxy = STATUS.get("consume_proxy", False)
                 proxy_api = STATUS["proxy_api"]
@@ -542,10 +558,30 @@ def automation_worker():
             proxy_config = None
             current_node = "本机主线直连"
             proxy_ready = True
-            if use_tor:
+
+            if route_mode == "tor":
+                if tor_new_ip and run_counter > 0:
+                    renew_tor_circuit()
                 proxy_config = {"server": "socks5://127.0.0.1:9050"}
                 current_node = "Tor 匿名中继通道"
-            else:
+            elif route_mode == "tunnel":
+                if not tunnel_proxy:
+                    add_log("⚠️ [隧道未配置] 请填写住宅隧道网关地址！")
+                    proxy_ready = False
+                else:
+                    try:
+                        norm = normalize_proxy_entry(tunnel_proxy) or tunnel_proxy
+                        ok, pw_cfg, country, exit_ip = validate_single_proxy(norm)
+                        if ok:
+                            proxy_config = pw_cfg
+                            current_node = f"隧道网关 -> {exit_ip} [{country}]"
+                            add_log(f"✅ [住宅隧道] 当前分配出口: {exit_ip} [{country}]")
+                        else:
+                            raise Exception("Tunnel Check Failed")
+                    except Exception as te:
+                        add_log(f"❌ [隧道异常] 住宅网关连接检测失败: {str(te)[:40]}")
+                        proxy_ready = False
+            elif route_mode == "pool":
                 api_list = [u.strip() for u in proxy_api.splitlines() if u.strip()]
                 if api_list and len(proxy_pool) < 3:
                     for _ in range(len(api_list)):
@@ -576,7 +612,7 @@ def automation_worker():
                     cand = random.choice(proxy_pool)
                     add_log(f"🔍 [节点测速] 验证链路: {cand}")
                     try:
-                        ok, pw_cfg, country = validate_single_proxy(cand)
+                        ok, pw_cfg, country, _ = validate_single_proxy(cand)
                         if ok:
                             proxy_fail_counts[cand] = 0
                             proxy_config = pw_cfg
@@ -649,17 +685,20 @@ def automation_worker():
                                 pass
                         page.route("**/*", handle_route)
 
-                    add_log(f"🎯 [访问入口] 加载 Page A: {target_url}")
+                    wait_strategy = "load" if load_mode == "full" else "domcontentloaded"
+                    add_log(f"🎯 [访问入口] 加载 Page A ({wait_strategy}, 超时{load_timeout_ms//1000}s): {target_url}")
                     traffic_referer = select_traffic_channel()
                     if traffic_referer and traffic_referer != "direct_access":
-                        page.goto(target_url, referer=traffic_referer, wait_until="domcontentloaded", timeout=45000)
+                        page.goto(target_url, referer=traffic_referer, wait_until=wait_strategy, timeout=load_timeout_ms)
                     else:
-                        page.goto(target_url, wait_until="domcontentloaded", timeout=45000)
-                    try:
-                        page.wait_for_load_state("networkidle", timeout=8000)
-                    except Exception:
-                        pass
-                    safe_sleep(2.0)
+                        page.goto(target_url, wait_until=wait_strategy, timeout=load_timeout_ms)
+                    if load_mode == "full":
+                        try:
+                            page.wait_for_load_state("networkidle", timeout=10000)
+                        except Exception:
+                            pass
+                    if render_wait > 0:
+                        safe_sleep(render_wait)
                     capture_preview(page)
 
                     main_stay = random.randint(stay_min, stay_max)
@@ -684,8 +723,9 @@ def automation_worker():
                                     chosen_inner = random.choice(internal_links)
                                     visited.add(chosen_inner.rstrip("/"))
                                     add_log(f"🔗 [深度游览 {idx+1}/{pages_to_visit}] -> {chosen_inner[:60]}")
-                                    page.goto(chosen_inner, wait_until="domcontentloaded", timeout=35000)
-                                    safe_sleep(1.5)
+                                    page.goto(chosen_inner, wait_until=wait_strategy, timeout=load_timeout_ms)
+                                    if render_wait > 0:
+                                        safe_sleep(render_wait)
                                 else:
                                     candidates = page.locator("main div.cursor-pointer, .grid .cursor-pointer")
                                     cnt = candidates.count()
@@ -701,10 +741,10 @@ def automation_worker():
                                     add_log(f"🖱️ [JS内页点击 {idx+1}/{pages_to_visit}] 触发卡片/按钮跳转 (第 {pick_idx+1} 项)")
                                     target_el.click(timeout=8000)
                                     try:
-                                        page.wait_for_load_state("domcontentloaded", timeout=15000)
+                                        page.wait_for_load_state(wait_strategy, timeout=15000)
                                     except Exception:
                                         pass
-                                    safe_sleep(2.5)
+                                    safe_sleep(max(2, render_wait))
 
                                 capture_preview(page)
                                 inner_stay = random.randint(max(3, stay_min // 2), max(5, stay_max // 2))
@@ -813,6 +853,9 @@ def control():
     with status_lock:
         STATUS.update({
             "target_urls": d.get("urls", "").strip(),
+            "load_mode": d.get("load_mode", "full"),
+            "load_timeout": safe_int(d.get("load_timeout"), 45),
+            "render_wait": safe_int(d.get("render_wait"), 3),
             "stay_min": safe_int(d.get("stay_min"), 8),
             "stay_max": safe_int(d.get("stay_max"), 20),
             "video_min": safe_int(d.get("video_min"), 30),
@@ -823,7 +866,9 @@ def control():
             "inner_page_prob": safe_int(d.get("inner_page_prob"), 75),
             "max_inner_pages": safe_int(d.get("max_inner_pages"), 2),
             "device_mode": d.get("device_mode", "mixed"),
-            "use_tor": d.get("tor") == "true",
+            "route_mode": d.get("route_mode", "pool"),
+            "tunnel_proxy": d.get("tunnel_proxy", "").strip(),
+            "tor_new_ip": d.get("tor_new_ip") == "true",
             "strict_proxy": d.get("strict_proxy") == "true",
             "consume_proxy": d.get("consume_proxy") == "true",
             "play_video": d.get("vid") == "true",
@@ -886,7 +931,7 @@ def check_proxies():
 
         def _test(cand):
             try:
-                ok, _, _ = validate_single_proxy(cand)
+                ok, _, _, _ = validate_single_proxy(cand)
                 return cand if ok else None
             except Exception:
                 return None
@@ -1009,7 +1054,7 @@ textarea { height:75px; }
 </style></head>
 <body>
 <div class="header-bar">
-  <div><h1>矩阵自动化综合操盘控制台 (媒体与代理增强版)</h1>
+  <div><h1>矩阵自动化综合操盘控制台 (GitHub 终极发布版)</h1>
   <span>● 状态: <span id="run-status" style="font-weight:bold;">检测中...</span> | 当前节点: <span id="current-node" style="color:#00ccff;">待命</span></span></div>
   <a href="/logout" style="color:#ff3333; font-weight:bold; text-decoration:none;">[安全登出]</a>
 </div>
@@ -1024,6 +1069,16 @@ textarea { height:75px; }
     <form id="control-form">
       <p>目标 URL 列表 (支持首页或直接填播放页，每行一个随机轮询):<br><textarea name="urls" required>{{ cfg.target_urls }}</textarea></p>
       <div class="row-3">
+        <p>页面加载策略:<br>
+          <select name="load_mode">
+            <option value="full" {% if cfg.load_mode == 'full' %}selected{% endif %}>完全加载 (适合住宅代理)</option>
+            <option value="fast" {% if cfg.load_mode == 'fast' %}selected{% endif %}>极速加载 (适合Tor慢节点)</option>
+          </select>
+        </p>
+        <p>加载超时上限 (秒):<br><input type="number" name="load_timeout" value="{{ cfg.load_timeout }}"></p>
+        <p>加载后渲染缓冲 (秒):<br><input type="number" name="render_wait" value="{{ cfg.render_wait }}"></p>
+      </div>
+      <div class="row-3">
         <p>页面浏览 (最小/最大秒):<br><span style="display:flex; gap:4px;"><input type="number" name="stay_min" value="{{ cfg.stay_min }}"><input type="number" name="stay_max" value="{{ cfg.stay_max }}"></span></p>
         <p>视频播放 (最小/最大秒):<br><span style="display:flex; gap:4px;"><input type="number" name="video_min" value="{{ cfg.video_min }}"><input type="number" name="video_max" value="{{ cfg.video_max }}"></span></p>
         <p>轮次冷却 (最小/最大秒):<br><span style="display:flex; gap:4px;"><input type="number" name="interval_min" value="{{ cfg.interval_min }}"><input type="number" name="interval_max" value="{{ cfg.interval_max }}"></span></p>
@@ -1034,11 +1089,14 @@ textarea { height:75px; }
         <p>最大轮次 (0=无限):<br><input type="number" name="max_runs" value="{{ cfg.max_runs }}"></p>
       </div>
       <div class="row-2">
-        <p>一级点击目标 (CSS 或 coord:X,Y):<br><input type="text" name="click_selector" value="{{ cfg.click_selector }}" placeholder="可选: coord:960,1020"></p>
-        <p>二级点击目标 (可选):<br><input type="text" name="sub_click_selector" value="{{ cfg.sub_click_selector }}"></p>
-      </div>
-      <div class="row-2">
-        <p>自定义 Referer (留空自动权重分流):<br><input type="text" name="referer" value="{{ cfg.referer }}" placeholder="https://www.google.com"></p>
+        <p>网络路由模式:<br>
+          <select name="route_mode">
+            <option value="pool" {% if cfg.route_mode == 'pool' %}selected{% endif %}>代理池 / 多 API 轮替</option>
+            <option value="tunnel" {% if cfg.route_mode == 'tunnel' %}selected{% endif %}>千万级住宅隧道网关 (单入口自动换IP)</option>
+            <option value="tor" {% if cfg.route_mode == 'tor' %}selected{% endif %}>Tor 匿名网络 (127.0.0.1:9050)</option>
+            <option value="direct" {% if cfg.route_mode == 'direct' %}selected{% endif %}>本机直连</option>
+          </select>
+        </p>
         <p>设备指纹模式:<br>
           <select name="device_mode">
             <option value="mixed" {% if cfg.device_mode == 'mixed' %}selected{% endif %}>PC+移动混合</option>
@@ -1047,22 +1105,28 @@ textarea { height:75px; }
           </select>
         </p>
       </div>
+      <p>住宅隧道网关地址 (选择“千万级住宅隧道网关”时必填):<br><input type="text" name="tunnel_proxy" value="{{ cfg.tunnel_proxy }}" placeholder="例如: http://user:pass@gate.provider.com:7000"></p>
+      <div class="row-2">
+        <p>一级点击目标 (CSS 或 coord:X,Y):<br><input type="text" name="click_selector" value="{{ cfg.click_selector }}" placeholder="可选: coord:960,1020"></p>
+        <p>二级点击目标 (可选):<br><input type="text" name="sub_click_selector" value="{{ cfg.sub_click_selector }}"></p>
+      </div>
+      <p>自定义 Referer (留空自动权重分流):<br><input type="text" name="referer" value="{{ cfg.referer }}" placeholder="https://www.google.com"></p>
       <p>拟人行为与网络开关：<br>
         <label style="color:#00ff66; font-weight:bold;"><input type="checkbox" name="vid" value="true" {% if cfg.play_video %}checked{% endif %}> 自动识别播放器并模拟播放视频 (按设定播放秒数)</label><br>
         <label><input type="checkbox" name="browse" value="true" {% if cfg.random_browse %}checked{% endif %}> 启用分段平滑滚动与回看阅读</label><br>
         <label><input type="checkbox" name="human_mouse" value="true" {% if cfg.human_mouse %}checked{% endif %}> 启用随机鼠标轨迹与元素悬停</label><br>
         <label style="color:#ffaa00;"><input type="checkbox" name="block_ads" value="true" {% if cfg.block_ads %}checked{% endif %}> 开启高能耗第三方脚本拦截</label><br>
-        <label><input type="checkbox" name="tor" value="true" {% if cfg.use_tor %}checked{% endif %}> 强制走 Tor (127.0.0.1:9050) 通道</label><br>
-        <label style="color:#00ccff;"><input type="checkbox" name="strict_proxy" value="true" {% if cfg.strict_proxy %}checked{% endif %}> 严格代理模式 (无可用代理时不回退直连)</label><br>
+        <label><input type="checkbox" name="tor_new_ip" value="true" {% if cfg.tor_new_ip %}checked{% endif %}> Tor 模式下每轮自动切换新出口 IP</label><br>
+        <label style="color:#00ccff;"><input type="checkbox" name="strict_proxy" value="true" {% if cfg.strict_proxy %}checked{% endif %}> 代理池模式下无可用节点时不回退直连</label><br>
         <label style="color:#00ccff;"><input type="checkbox" name="consume_proxy" value="true" {% if cfg.consume_proxy %}checked{% endif %}> 代理用后即焚 (每轮用完移除，少于3个自动拉取新IP)</label>
       </p>
       <button type="button" class="btn" onclick="sendControl('start')">启动 / 应用配置</button>
       <button type="button" class="btn btn-stop" onclick="sendControl('stop')">紧急全面停滞</button>
     </form>
   </div>
-  <div class="card"><h3>代理 IP 资源池管理 (全协议/JSON兼容)</h3>
+  <div class="card"><h3>代理 IP 资源池管理 (全协议/JSON/域名兼容)</h3>
     <p>API 提取链路 (每行一个接口，自动轮替，兼容 JSON/文本)：<br><textarea id="api-url" placeholder="http://api1.com/get&#10;http://api2.com/get">{{ cfg.proxy_api }}</textarea></p>
-    <p>手动批量粘贴 IP (兼容 ip:port / ip:port:user:pass / socks5://)：<br><textarea id="paste-ips" placeholder="12.34.56.78:8080&#10;socks5://user:pass@1.2.3.4:1080"></textarea></p>
+    <p>手动批量粘贴 IP (兼容 ip:port / 域名:端口 / ip:port:user:pass / socks5://)：<br><textarea id="paste-ips" placeholder="12.34.56.78:8080&#10;socks5://user:pass@gate.proxy.com:1080"></textarea></p>
     <button type="button" class="btn" onclick="injectIPs()">注入文本池</button>
     <button type="button" class="btn btn-warn" onclick="checkProxies()">并发测速清洗</button>
     <button type="button" class="btn" onclick="window.location.href='/export_proxies'">导出存活</button>
@@ -1151,7 +1215,7 @@ except Exception as e:
     print(f"👉 你可以手动运行启动: {VENV_PY} {BASE_DIR}/app.py")
 
 print("==================================================")
-print("🎉 恭喜！矩阵自动化操盘系统（媒体与代理增强版）已安装成功！")
+print("🎉 恭喜！矩阵自动化操盘系统（GitHub 终极发布版）已安装成功！")
 print("📌 访问地址: http://<你的服务器IP>:5000")
 print("🔑 默认登录密码: admin888")
 print("==================================================")
