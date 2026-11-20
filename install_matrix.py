@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 print("==================================================")
-print(" Matrix 自动化综合操盘系统 - 全开关可控发布版 ")
+print(" Matrix 自动化综合操盘系统 - GitHub 最终完整版 ")
 print("==================================================")
 
 BASE_DIR = "/opt/auto_browser_system"
@@ -36,6 +36,7 @@ except Exception as e:
 
 print("[3/5] 正在写入后端控制核心 (app.py)...")
 app_code = r'''# -*- coding: utf-8 -*-
+import base64
 import concurrent.futures
 import json
 import os
@@ -80,6 +81,8 @@ DEFAULT_STATUS = {
     "inner_page_prob": 0,
     "max_inner_pages": 0,
     "enable_click": False,
+    "click_prob": 100,
+    "popup_prob": 50,
     "click_selector": "",
     "sub_click_selector": "",
     "play_video": False,
@@ -104,7 +107,7 @@ DEFAULT_STATUS = {
     "block_ads": True,
     "current_node": "待命",
     "stats": {"total": 0, "success": 0, "failed": 0},
-    "logs": ["[系统提示] 矩阵综合操盘主板已初始化（全开关可控版），等待下达指令..."]
+    "logs": ["[系统提示] 矩阵综合操盘主板已初始化（GitHub 最终完整版），等待下达指令..."]
 }
 
 STATUS = json.loads(json.dumps(DEFAULT_STATUS))
@@ -119,7 +122,9 @@ DESKTOP_PROFILES = [
 
 MOBILE_PROFILES = [
     {"name": "iPhone15_iOS_Safari", "type": "mobile", "ua": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Mobile/15E148 Safari/604.1", "w": 393, "h": 852, "touch": True, "scale": 3},
-    {"name": "Android_Pixel8_Chrome", "type": "mobile", "ua": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36", "w": 412, "h": 915, "touch": True, "scale": 2.6}
+    {"name": "Android_Pixel8_Chrome", "type": "mobile", "ua": "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36", "w": 412, "h": 915, "touch": True, "scale": 2.6},
+    {"name": "Samsung_S24_Chrome", "type": "mobile", "ua": "Mozilla/5.0 (Linux; Android 14; SM-S921B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Mobile Safari/537.36", "w": 360, "h": 780, "touch": True, "scale": 3},
+    {"name": "iPadPro_Safari_Tablet", "type": "mobile", "ua": "Mozilla/5.0 (iPad; CPU OS 17_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.3 Mobile/15E148 Safari/604.1", "w": 1024, "h": 1366, "touch": True, "scale": 2}
 ]
 
 AD_BLOCK_KEYWORDS = [
@@ -130,9 +135,9 @@ AD_BLOCK_KEYWORDS = [
 PERSIST_KEYS = [
     "enable_main_site", "target_urls", "enable_stay", "stay_min", "stay_max",
     "random_browse", "human_mouse", "enable_inner", "inner_page_prob", "max_inner_pages",
-    "enable_click", "click_selector", "sub_click_selector", "play_video", "video_urls",
-    "video_min", "video_max", "load_mode", "load_timeout", "render_wait",
-    "interval_min", "interval_max", "max_runs", "device_mode", "referer",
+    "enable_click", "click_prob", "popup_prob", "click_selector", "sub_click_selector",
+    "play_video", "video_urls", "video_min", "video_max", "load_mode", "load_timeout",
+    "render_wait", "interval_min", "interval_max", "max_runs", "device_mode", "referer",
     "route_mode", "tunnel_proxy", "tor_new_ip", "strict_proxy", "consume_proxy",
     "proxy_api", "proxy_pool", "block_ads"
 ]
@@ -215,6 +220,15 @@ def parse_and_scale_coord(selector_str, target_w, target_h, base_w=1920, base_h=
             scaled_y = max(1, min(target_h - 1, int((orig_y / base_h) * target_h)))
             return True, scaled_x, scaled_y
     return False, 0, 0
+
+
+def smart_tap_or_click(page, profile, x, y):
+    if profile.get("touch", False):
+        page.touchscreen.tap(x, y)
+    else:
+        page.mouse.move(x, y, steps=random.randint(8, 15))
+        safe_sleep(random.uniform(0.15, 0.4))
+        page.mouse.click(x, y)
 
 
 def normalize_proxy_entry(raw):
@@ -326,6 +340,30 @@ def renew_tor_circuit():
         pass
 
 
+def handle_extra_popups(context, main_page, popup_prob):
+    """按弹窗比例处理意外弹出的新窗口"""
+    pages = list(context.pages)
+    if len(pages) <= 1:
+        return main_page
+    extra = pages[-1]
+    if popup_prob > 0 and random.randint(1, 100) <= popup_prob:
+        add_log(f"🪟 [弹窗保留] 命中 {popup_prob}% 弹窗比例，切入浏览 -> {extra.url[:55]}")
+        try:
+            extra.wait_for_load_state("domcontentloaded", timeout=15000)
+        except Exception:
+            pass
+        capture_preview(extra)
+        return extra
+    add_log("🚫 [弹窗关闭] 按比例关闭多余弹窗，保留主页面")
+    for p in pages:
+        if p != main_page:
+            try:
+                p.close()
+            except Exception:
+                pass
+    return main_page
+
+
 def simulate_human_browsing(page, profile, stay_seconds, do_scroll=True, do_mouse=True):
     if stay_seconds <= 0:
         return
@@ -381,7 +419,7 @@ def simulate_human_browsing(page, profile, stay_seconds, do_scroll=True, do_mous
     capture_preview(page)
 
 
-def _try_trigger_player_in_frame(page, frame):
+def _try_trigger_player_in_frame(page, frame, profile):
     play_btn_selectors = [
         ".vjs-big-play-button", ".vjs-play-control", ".plyr__control--overlaid",
         "[data-plyr='play']", ".dplayer-play-icon", ".dplayer-video-wrap",
@@ -400,9 +438,7 @@ def _try_trigger_player_in_frame(page, frame):
                 btn.scroll_into_view_if_needed(timeout=2000)
                 box = btn.bounding_box()
                 if box and box["width"] > 5 and box["height"] > 5:
-                    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2, steps=8)
-                    safe_sleep(0.2)
-                    page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                    smart_tap_or_click(page, profile, box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
                 else:
                     btn.click(timeout=2500)
                 add_log(f"▶️ [播放器起播] 触发控件 -> {sel}")
@@ -417,12 +453,8 @@ def _try_trigger_player_in_frame(page, frame):
             vid.scroll_into_view_if_needed(timeout=2500)
             box = vid.bounding_box()
             if box and box["width"] > 40 and box["height"] > 40:
-                cx = box["x"] + box["width"] / 2
-                cy = box["y"] + box["height"] / 2
-                page.mouse.move(cx, cy, steps=random.randint(6, 12))
-                safe_sleep(0.25)
-                page.mouse.click(cx, cy)
-                add_log("▶️ [播放器起播] 点击 <video> 画面中央")
+                smart_tap_or_click(page, profile, box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                add_log("▶️ [播放器起播] 触发 <video> 画面中央")
                 safe_sleep(0.8)
 
             res = frame.evaluate("""() => {
@@ -451,7 +483,7 @@ def simulate_video_playback(page, profile, play_seconds, do_mouse=True):
     for frame in list(page.frames):
         if stop_event.is_set():
             break
-        if _try_trigger_player_in_frame(page, frame):
+        if _try_trigger_player_in_frame(page, frame, profile):
             triggered = True
             break
 
@@ -474,11 +506,9 @@ def simulate_video_playback(page, profile, play_seconds, do_mouse=True):
             if target_box:
                 page.evaluate(f"window.scrollTo({{top: Math.max(0, {target_box['top']} - 100), behavior: 'smooth'}})")
                 safe_sleep(0.6)
-                page.mouse.move(target_box["x"], target_box["y"], steps=10)
-                safe_sleep(0.3)
-                page.mouse.click(target_box["x"], target_box["y"])
+                smart_tap_or_click(page, profile, target_box["x"], target_box["y"])
                 triggered = True
-                add_log("▶️ [播放器兜底] 点击最大播放器/iframe 容器中央")
+                add_log("▶️ [播放器兜底] 触发最大播放器/iframe 容器中央")
         except Exception:
             pass
 
@@ -530,26 +560,37 @@ def simulate_video_playback(page, profile, play_seconds, do_mouse=True):
     capture_preview(page)
 
 
-def perform_click(page, context, selector_str, profile, step_label="一级点击"):
+def perform_click(page, context, selector_str, profile, popup_prob=50, step_label="一级点击"):
     is_coord, cx, cy = parse_and_scale_coord(selector_str, profile["w"], profile["h"])
     try:
         with context.expect_page(timeout=8000) as popup_info:
             if is_coord:
-                add_log(f"🖱️ [{step_label}] 移动并点击坐标 -> X:{cx}, Y:{cy}")
-                page.mouse.move(cx, cy, steps=random.randint(8, 15))
-                safe_sleep(random.uniform(0.2, 0.5))
-                page.mouse.click(cx, cy)
+                mode_tag = "触控" if profile.get("touch", False) else "鼠标"
+                add_log(f"🖱️ [{step_label}] {mode_tag}坐标 -> X:{cx}, Y:{cy}")
+                smart_tap_or_click(page, profile, cx, cy)
             else:
-                add_log(f"🖱️ [{step_label}] 点击选择器 -> [{selector_str}]")
-                page.click(selector_str, timeout=10000)
+                add_log(f"🖱️ [{step_label}] 选择器 -> [{selector_str}]")
+                el = page.locator(selector_str).first
+                el.scroll_into_view_if_needed(timeout=4000)
+                if profile.get("touch", False):
+                    el.tap(timeout=10000)
+                else:
+                    el.click(timeout=10000)
         popup_page = popup_info.value
-        add_log(f"🪟 [新标签捕获] 打开页面 -> {popup_page.url[:60]}")
+        if popup_prob > 0 and random.randint(1, 100) <= popup_prob:
+            add_log(f"🪟 [新标签保留] 命中 {popup_prob}% 弹窗比例，打开 -> {popup_page.url[:60]}")
+            try:
+                popup_page.wait_for_load_state("domcontentloaded", timeout=20000)
+            except Exception:
+                pass
+            capture_preview(popup_page)
+            return popup_page
+        add_log("🚫 [弹窗关闭] 按弹窗比例关闭新标签，留在本页")
         try:
-            popup_page.wait_for_load_state("domcontentloaded", timeout=20000)
+            popup_page.close()
         except Exception:
             pass
-        capture_preview(popup_page)
-        return popup_page
+        return page
     except Exception:
         add_log(f"ℹ️ [{step_label}] 当前页内继续流转")
         try:
@@ -593,6 +634,8 @@ def automation_worker():
                 max_inner = max(0, int(STATUS["max_inner_pages"]))
 
                 enable_click = STATUS.get("enable_click", False)
+                click_prob = max(0, min(100, int(STATUS.get("click_prob", 100))))
+                popup_prob = max(0, min(100, int(STATUS.get("popup_prob", 50))))
                 click_selector = STATUS["click_selector"]
                 sub_click_selector = STATUS["sub_click_selector"]
 
@@ -727,7 +770,8 @@ def automation_worker():
                 STATUS["stats"]["total"] += 1
 
             profile = choose_device_profile(device_mode)
-            add_log(f"🌐 [第 {run_counter} 轮] 通道: {current_node} | 🎭 指纹: {profile['name']}")
+            dev_tag = "📱 移动端" if profile.get("touch") else "💻 PC端"
+            add_log(f"🌐 [第 {run_counter} 轮] 通道: {current_node} | {dev_tag}: {profile['name']}")
             browser = None
             cycle_ok = False
             try:
@@ -768,7 +812,6 @@ def automation_worker():
                     traffic_referer = select_traffic_channel()
                     active_page = page
 
-                    # 模块一：普通网页访问（仅在开关开启且 URL 非空时执行）
                     if has_main_task:
                         target_url = random.choice(url_list)
                         if not target_url.startswith(("http://", "https://")):
@@ -786,13 +829,13 @@ def automation_worker():
                                 pass
                         if render_wait > 0:
                             safe_sleep(render_wait)
-                        capture_preview(page)
+                        active_page = handle_extra_popups(context, page, popup_prob)
+                        capture_preview(active_page)
 
                         if enable_stay and stay_max > 0:
                             main_stay = random.randint(stay_min, stay_max)
-                            simulate_human_browsing(page, profile, main_stay, do_scroll=random_browse, do_mouse=human_mouse)
+                            simulate_human_browsing(active_page, profile, main_stay, do_scroll=random_browse, do_mouse=human_mouse)
 
-                        # 深度游览：开关开启 且 概率>0 且 数量>0 时才执行
                         if enable_inner and inner_prob > 0 and max_inner > 0 and random.randint(1, 100) <= inner_prob and not stop_event.is_set():
                             pages_to_visit = random.randint(1, max_inner)
                             main_domain = urlparse(target_url).netloc
@@ -827,31 +870,33 @@ def automation_worker():
                                         target_el.scroll_into_view_if_needed(timeout=5000)
                                         safe_sleep(random.uniform(0.4, 1.0))
                                         add_log(f"🖱️ [JS内页点击 {idx+1}/{pages_to_visit}] 触发卡片/按钮跳转 (第 {pick_idx+1} 项)")
-                                        target_el.click(timeout=8000)
+                                        if profile.get("touch", False):
+                                            target_el.tap(timeout=8000)
+                                        else:
+                                            target_el.click(timeout=8000)
                                         try:
                                             page.wait_for_load_state(wait_strategy, timeout=15000)
                                         except Exception:
                                             pass
                                         safe_sleep(max(2, render_wait))
 
-                                    capture_preview(page)
+                                    active_page = handle_extra_popups(context, page, popup_prob)
+                                    capture_preview(active_page)
                                     if enable_stay and stay_max > 0:
                                         inner_stay = random.randint(max(1, stay_min // 2), max(1, stay_max // 2))
-                                        simulate_human_browsing(page, profile, inner_stay, do_scroll=random_browse, do_mouse=human_mouse)
+                                        simulate_human_browsing(active_page, profile, inner_stay, do_scroll=random_browse, do_mouse=human_mouse)
                                 except Exception:
                                     break
 
-                        # 链式点击：开关开启 且 选择器非空时才执行
-                        if enable_click and click_selector and not stop_event.is_set():
-                            active_page = perform_click(page, context, click_selector, profile, "一级点击")
+                        if enable_click and click_selector and click_prob > 0 and random.randint(1, 100) <= click_prob and not stop_event.is_set():
+                            active_page = perform_click(active_page, context, click_selector, profile, popup_prob=popup_prob, step_label="一级点击")
                             if enable_stay and stay_max > 0:
                                 simulate_human_browsing(active_page, profile, random.randint(3, 6), do_scroll=random_browse, do_mouse=human_mouse)
                             if sub_click_selector and not stop_event.is_set():
-                                active_page = perform_click(active_page, context, sub_click_selector, profile, "二级点击")
+                                active_page = perform_click(active_page, context, sub_click_selector, profile, popup_prob=popup_prob, step_label="二级点击")
                                 safe_sleep(2.0)
                                 capture_preview(active_page)
 
-                    # 模块二：独立视频播放任务（开关开启 且 播放时长>0 时执行）
                     if has_video_task and not stop_event.is_set():
                         if video_list:
                             v_url = random.choice(video_list)
@@ -869,7 +914,7 @@ def automation_worker():
                                     pass
                             if render_wait > 0:
                                 safe_sleep(render_wait)
-                            active_page = page
+                            active_page = handle_extra_popups(context, page, popup_prob)
 
                         actual_watch = random.randint(video_min, video_max)
                         simulate_video_playback(active_page, profile, actual_watch, do_mouse=human_mouse)
@@ -948,6 +993,113 @@ def screenshot():
     return Response(img, mimetype="image/png")
 
 
+@app.route("/pick_page", methods=["POST"])
+@login_required
+def pick_page():
+    target_url = request.form.get("url", "").strip()
+    view_type = request.form.get("view", "desktop")
+    if not target_url:
+        return jsonify({"status": "failed", "msg": "请先输入要预览点选的网页 URL"})
+    if not target_url.startswith(("http://", "https://")):
+        target_url = "https://" + target_url
+
+    vw, vh = (393, 852) if view_type == "mobile" else (1920, 1080)
+    ua = MOBILE_PROFILES[0]["ua"] if view_type == "mobile" else DESKTOP_PROFILES[0]["ua"]
+
+    proxy_config = None
+    with status_lock:
+        route_mode = STATUS.get("route_mode", "pool")
+        tunnel_proxy = STATUS.get("tunnel_proxy", "").strip()
+    if route_mode == "tor":
+        proxy_config = {"server": "socks5://127.0.0.1:9050"}
+    elif route_mode == "tunnel" and tunnel_proxy:
+        norm = normalize_proxy_entry(tunnel_proxy) or tunnel_proxy
+        pw_cfg, _ = parse_proxy(norm)
+        proxy_config = pw_cfg
+
+    browser = None
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(
+                headless=True, proxy=proxy_config,
+                args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+            )
+            context = browser.new_context(viewport={"width": vw, "height": vh}, user_agent=ua, has_touch=(view_type == "mobile"))
+            page = context.new_page()
+            page.goto(target_url, wait_until="domcontentloaded", timeout=35000)
+            try:
+                page.wait_for_load_state("networkidle", timeout=6000)
+            except Exception:
+                pass
+            safe_sleep(1.5)
+
+            elements = page.evaluate(f"""() => {{
+                function getSelector(el) {{
+                    if (el.id) return '#' + CSS.escape(el.id);
+                    const parts = [];
+                    let cur = el;
+                    while (cur && cur.nodeType === 1 && cur.tagName.toLowerCase() !== 'html') {{
+                        let sel = cur.tagName.toLowerCase();
+                        if (cur.id) {{
+                            parts.unshift('#' + CSS.escape(cur.id));
+                            break;
+                        }}
+                        if (cur.className && typeof cur.className === 'string') {{
+                            const cls = cur.className.trim().split(/\\s+/).filter(c => c && !c.includes(':')).slice(0, 2);
+                            if (cls.length) sel += '.' + cls.map(c => CSS.escape(c)).join('.');
+                        }}
+                        const parent = cur.parentElement;
+                        if (parent) {{
+                            const siblings = Array.from(parent.children).filter(c => c.tagName === cur.tagName);
+                            if (siblings.length > 1) {{
+                                sel += ':nth-of-type(' + (siblings.indexOf(cur) + 1) + ')';
+                            }}
+                        }}
+                        parts.unshift(sel);
+                        cur = parent;
+                        if (parts.length >= 4) break;
+                    }}
+                    return parts.join(' > ');
+                }}
+                const list = [];
+                const nodes = document.querySelectorAll('a, button, input, video, iframe, img, div, span');
+                for (const el of nodes) {{
+                    const r = el.getBoundingClientRect();
+                    if (r.width >= 12 && r.height >= 12 && r.right > 0 && r.bottom > 0 && r.left < {vw} && r.top < {vh}) {{
+                        list.push({{
+                            x: Math.round(r.left),
+                            y: Math.round(r.top),
+                            w: Math.round(r.width),
+                            h: Math.round(r.height),
+                            area: Math.round(r.width * r.height),
+                            selector: getSelector(el),
+                            tag: el.tagName.toLowerCase()
+                        }});
+                    }}
+                }}
+                list.sort((a, b) => a.area - b.area);
+                return list.slice(0, 350);
+            }}""")
+
+            img_bytes = page.screenshot(type="png")
+            b64 = base64.b64encode(img_bytes).decode("ascii")
+            return jsonify({
+                "status": "ok",
+                "image": "data:image/png;base64," + b64,
+                "elements": elements,
+                "vw": vw,
+                "vh": vh
+            })
+    except Exception as e:
+        return jsonify({"status": "failed", "msg": f"加载页面失败: {str(e)[:80]}"})
+    finally:
+        if browser:
+            try:
+                browser.close()
+            except Exception:
+                pass
+
+
 @app.route("/control", methods=["POST"])
 @login_required
 def control():
@@ -974,6 +1126,8 @@ def control():
             "inner_page_prob": safe_int(d.get("inner_page_prob"), 0),
             "max_inner_pages": safe_int(d.get("max_inner_pages"), 0),
             "enable_click": d.get("enable_click") == "true",
+            "click_prob": safe_int(d.get("click_prob"), 0),
+            "popup_prob": safe_int(d.get("popup_prob"), 0),
             "click_selector": d.get("click_selector", "").strip(),
             "sub_click_selector": d.get("sub_click_selector", "").strip(),
             "play_video": d.get("vid") == "true",
@@ -1126,10 +1280,10 @@ print("[4/5] 正在写入前端页面与样式模板...")
 
 login_html = r"""<!DOCTYPE html>
 <html>
-<head><title>矩阵系统安全鉴权</title><meta charset="utf-8">
+<head><title>矩阵系统安全鉴权</title><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
 body { background:#0a0a0a; color:#00ff66; font-family:monospace; display:flex; justify-content:center; align-items:center; height:100vh; margin:0; }
-.box { border:1px solid #00ff66; padding:30px; background:#111; text-align:center; box-shadow:0 0 15px rgba(0,255,102,0.3); border-radius:6px; }
+.box { border:1px solid #00ff66; padding:30px; background:#111; text-align:center; box-shadow:0 0 15px rgba(0,255,102,0.3); border-radius:6px; max-width:90%; }
 input { background:#000; border:1px solid #00ff66; color:#00ff66; padding:10px; font-family:monospace; margin-bottom:15px; width:220px; text-align:center; }
 button { background:#00ff66; color:#000; border:none; padding:10px 24px; font-weight:bold; cursor:pointer; font-family:monospace; }
 </style></head>
@@ -1143,9 +1297,9 @@ with open(os.path.join(BASE_DIR, "templates/login.html"), "w", encoding="utf-8")
 
 index_html = r"""<!DOCTYPE html>
 <html>
-<head><title>矩阵自动化综合操盘控制台</title><meta charset="utf-8">
+<head><title>矩阵自动化综合操盘控制台</title><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
 <style>
-body { background:#090909; color:#e0e0e0; font-family:monospace; margin:20px; }
+body { background:#090909; color:#e0e0e0; font-family:monospace; margin:16px; }
 h1, h3 { color:#00ff66; margin-top:0; }
 .grid { display:grid; grid-template-columns: 1.15fr 0.85fr; gap:20px; }
 .card { background:#141414; border:1px solid #333; padding:16px; border-radius:6px; }
@@ -1160,19 +1314,23 @@ h1, h3 { color:#00ff66; margin-top:0; }
 .btn-stop:hover { background:#ff3333; color:#000; }
 .btn-warn { color:#ffaa00; border-color:#ffaa00; }
 .btn-warn:hover { background:#ffaa00; color:#000; }
-input[type="text"], input[type="number"], select, textarea { background:#000; border:1px solid #444; color:#fff; padding:6px; width:98%; font-family:monospace; box-sizing:border-box; }
+input[type="text"], input[type="number"], select, textarea { background:#000; border:1px solid #444; color:#fff; padding:6px; width:100%; font-family:monospace; box-sizing:border-box; }
 .row-2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
 .row-3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; }
 textarea { height:60px; }
 .log-box { background:#020202; border:1px solid #ffaa00; height:320px; overflow-y:auto; padding:10px; font-size:12px; color:#ffaa00; white-space:pre-wrap; }
 .preview-box { background:#000; border:1px solid #333; min-height:180px; display:flex; align-items:center; justify-content:center; margin-top:10px; border-radius:4px; overflow:hidden; }
 .preview-box img { max-width:100%; max-height:260px; display:block; }
-.header-bar { display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #00ff66; padding-bottom:10px; margin-bottom:15px; }
+.header-bar { display:flex; justify-content:space-between; align-items:center; border-bottom:2px solid #00ff66; padding-bottom:10px; margin-bottom:15px; flex-wrap:wrap; gap:8px; }
 .sw { font-weight:bold; color:#00ff66; }
+@media (max-width: 900px) {
+  .grid, .row-2, .row-3 { grid-template-columns: 1fr; }
+  .stats-bar { grid-template-columns: 1fr 1fr; }
+}
 </style></head>
 <body>
 <div class="header-bar">
-  <div><h1>矩阵自动化综合操盘控制台 (全开关可控版)</h1>
+  <div><h1 style="font-size:18px; margin-bottom:4px;">矩阵自动化综合操盘控制台 (GitHub 最终完整版)</h1>
   <span>● 状态: <span id="run-status" style="font-weight:bold;">检测中...</span> | 当前节点: <span id="current-node" style="color:#00ccff;">待命</span></span></div>
   <a href="/logout" style="color:#ff3333; font-weight:bold; text-decoration:none;">[安全登出]</a>
 </div>
@@ -1193,8 +1351,8 @@ textarea { height:60px; }
 
       <div class="sub-card">
         <label class="sw"><input type="checkbox" name="enable_stay" value="true" {% if cfg.enable_stay %}checked{% endif %}> [开关2] 启用页面停留与阅读</label>
-        <label style="margin-left:12px;"><input type="checkbox" name="browse" value="true" {% if cfg.random_browse %}checked{% endif %}> [开关3] 分段滚动</label>
-        <label style="margin-left:12px;"><input type="checkbox" name="human_mouse" value="true" {% if cfg.human_mouse %}checked{% endif %}> [开关4] 鼠标轨迹</label>
+        <label style="margin-left:10px;"><input type="checkbox" name="browse" value="true" {% if cfg.random_browse %}checked{% endif %}> [开关3] 分段滚动</label>
+        <label style="margin-left:10px;"><input type="checkbox" name="human_mouse" value="true" {% if cfg.human_mouse %}checked{% endif %}> [开关4] 鼠标轨迹</label>
         <div class="row-3" style="margin-top:6px;">
           <p style="margin:0;">页面停留 (最小/最大秒, 0=不留):<br><span style="display:flex; gap:4px;"><input type="number" name="stay_min" value="{{ cfg.stay_min }}"><input type="number" name="stay_max" value="{{ cfg.stay_max }}"></span></p>
           <p style="margin:0;">加载超时上限 (秒):<br><input type="number" name="load_timeout" value="{{ cfg.load_timeout }}"></p>
@@ -1211,15 +1369,19 @@ textarea { height:60px; }
       </div>
 
       <div class="sub-card">
-        <label class="sw"><input type="checkbox" name="enable_click" value="true" {% if cfg.enable_click %}checked{% endif %}> [开关6] 启用链式点击流 (不勾或留空则不点击)</label>
+        <label class="sw"><input type="checkbox" id="chk-enable-click" name="enable_click" value="true" {% if cfg.enable_click %}checked{% endif %}> [开关6] 启用链式点击流 (支持可视化网页点选)</label>
         <div class="row-2" style="margin-top:6px;">
-          <p style="margin:0;">一级点击目标 (CSS 或 coord:X,Y):<br><input type="text" name="click_selector" value="{{ cfg.click_selector }}" placeholder="例如: coord:960,1020"></p>
-          <p style="margin:0;">二级点击目标 (可选):<br><input type="text" name="sub_click_selector" value="{{ cfg.sub_click_selector }}"></p>
+          <p style="margin:0;">点击触发比例 (%, 0=不点):<br><input type="number" name="click_prob" value="{{ cfg.click_prob }}"></p>
+          <p style="margin:0;">弹窗保留比例 (%, 0=自动关弹窗):<br><input type="number" name="popup_prob" value="{{ cfg.popup_prob }}"></p>
+        </div>
+        <div class="row-2" style="margin-top:6px;">
+          <p style="margin:0;">一级点击目标: <button type="button" class="btn btn-warn" style="padding:2px 8px; font-size:11px;" onclick="openPicker('click_selector')">🎯 网页点选</button><br><input type="text" id="input-click-selector" name="click_selector" value="{{ cfg.click_selector }}" placeholder="CSS 选择器或 coord:X,Y"></p>
+          <p style="margin:0;">二级点击目标: <button type="button" class="btn btn-warn" style="padding:2px 8px; font-size:11px;" onclick="openPicker('sub_click_selector')">🎯 网页点选</button><br><input type="text" id="input-sub-click-selector" name="sub_click_selector" value="{{ cfg.sub_click_selector }}"></p>
         </div>
       </div>
 
       <div class="sub-card">
-        <label class="sw"><input type="checkbox" name="vid" value="true" {% if cfg.play_video %}checked{% endif %}> [开关7] 启用独立视频播放任务 (全播放器兼容)</label>
+        <label class="sw"><input type="checkbox" name="vid" value="true" {% if cfg.play_video %}checked{% endif %}> [开关7] 启用独立视频播放任务 (PC/移动全播放器兼容)</label>
         <p style="margin:6px 0;">独立视频播放页 URL 列表 (每行一个，留空则仅播放当前页):<br><textarea name="video_urls" placeholder="https://example.com/play.html?id=1">{{ cfg.video_urls }}</textarea></p>
         <div class="row-3">
           <p style="margin:0;">视频播放 (最小/最大秒, 0=不播):<br><span style="display:flex; gap:4px;"><input type="number" name="video_min" value="{{ cfg.video_min }}"><input type="number" name="video_max" value="{{ cfg.video_max }}"></span></p>
@@ -1245,7 +1407,7 @@ textarea { height:60px; }
         </p>
         <p>设备指纹模式:<br>
           <select name="device_mode">
-            <option value="mixed" {% if cfg.device_mode == 'mixed' %}selected{% endif %}>PC+移动混合</option>
+            <option value="mixed" {% if cfg.device_mode == 'mixed' %}selected{% endif %}>PC+移动全融合</option>
             <option value="desktop" {% if cfg.device_mode == 'desktop' %}selected{% endif %}>仅桌面端</option>
             <option value="mobile" {% if cfg.device_mode == 'mobile' %}selected{% endif %}>仅移动端</option>
           </select>
@@ -1282,6 +1444,32 @@ textarea { height:60px; }
   <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;"><h3 style="margin:0;">系统全链路流控日志</h3><button type="button" class="btn btn-warn" onclick="clearLogs()">清空日志</button></div>
   <div class="log-box" id="log-console">加载日志中...</div>
 </div>
+
+<div id="picker-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.92); z-index:9999; padding:15px; overflow:auto;">
+  <div style="max-width:1280px; margin:0 auto; background:#141414; border:1px solid #00ff66; border-radius:6px; padding:15px;">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <h3 style="margin:0;">🎯 可视化网页点击目标拾取器 (PC/移动双视图)</h3>
+      <button type="button" class="btn btn-stop" onclick="closePicker()">关闭</button>
+    </div>
+    <div style="display:flex; gap:8px; margin-bottom:10px; align-items:center; flex-wrap:wrap;">
+      <input type="text" id="picker-url" placeholder="输入要打开的网页 URL" style="flex:1; min-width:220px;">
+      <select id="picker-view" style="width:150px;">
+        <option value="desktop">PC 视图 (1920×1080)</option>
+        <option value="mobile">手机视图 (393×852)</option>
+      </select>
+      <select id="picker-mode" style="width:210px;">
+        <option value="css">优先 CSS 选择器 (PC/手机通用)</option>
+        <option value="coord">优先坐标 (coord:X,Y)</option>
+      </select>
+      <button type="button" class="btn" onclick="loadPickerPage()">加载网页画面</button>
+    </div>
+    <div id="picker-status" style="color:#ffaa00; font-size:12px; margin-bottom:8px;">提示：点击“加载网页画面”后，直接在下方网页截图上点击你要操作的位置即可自动填入。</div>
+    <div style="position:relative; border:1px solid #333; background:#000; text-align:center;">
+      <img id="picker-img" src="" onclick="onPickerClick(event)" style="max-width:100%; cursor:crosshair; display:none; margin:0 auto;">
+    </div>
+  </div>
+</div>
+
 <script>
 function updateStatus() {
   fetch('/status').then(res => res.json()).then(data => {
@@ -1323,6 +1511,88 @@ function uploadTxt() {
   const fd = new FormData(); fd.append('file', fi.files[0]);
   fetch('/upload_txt', { method: 'POST', body: fd }).then(r => r.json()).then(d => { alert(d.msg); fi.value = ""; updateStatus(); });
 }
+
+let pickerTargetField = 'click_selector';
+let pickerElements = [];
+let pickerVW = 1920;
+let pickerVH = 1080;
+
+function openPicker(field) {
+  pickerTargetField = field;
+  const urlsText = document.querySelector('textarea[name="urls"]').value || '';
+  const vUrlsText = document.querySelector('textarea[name="video_urls"]').value || '';
+  const firstUrl = (urlsText.split('\n').find(u => u.trim()) || vUrlsText.split('\n').find(u => u.trim()) || '').trim();
+  document.getElementById('picker-url').value = firstUrl;
+  document.getElementById('picker-modal').style.display = 'block';
+  if (firstUrl) loadPickerPage();
+}
+
+function closePicker() {
+  document.getElementById('picker-modal').style.display = 'none';
+}
+
+function loadPickerPage() {
+  const url = document.getElementById('picker-url').value.trim();
+  if (!url) { alert('请输入网页 URL'); return; }
+  const st = document.getElementById('picker-status');
+  const img = document.getElementById('picker-img');
+  st.innerText = '⏳ 正在通过无头浏览器渲染网页画面，请稍候...';
+  img.style.display = 'none';
+
+  const fd = new FormData();
+  fd.append('url', url);
+  fd.append('view', document.getElementById('picker-view').value);
+  fetch('/pick_page', { method: 'POST', body: fd })
+    .then(r => r.json())
+    .then(d => {
+      if (d.status === 'ok') {
+        pickerElements = d.elements || [];
+        pickerVW = d.vw || 1920;
+        pickerVH = d.vh || 1080;
+        img.src = d.image;
+        img.style.display = 'block';
+        st.innerText = '✅ 画面已就绪！请直接点击下方网页中你想让程序操作的位置。';
+      } else {
+        st.innerText = '❌ ' + (d.msg || '加载失败');
+      }
+    })
+    .catch(() => { st.innerText = '❌ 请求超时或网络异常'; });
+}
+
+function onPickerClick(e) {
+  const img = document.getElementById('picker-img');
+  const rect = img.getBoundingClientRect();
+  const realX = Math.round(((e.clientX - rect.left) / rect.width) * pickerVW);
+  const realY = Math.round(((e.clientY - rect.top) / rect.height) * pickerVH);
+
+  let matched = null;
+  for (const el of pickerElements) {
+    if (realX >= el.x && realX <= el.x + el.w && realY >= el.y && realY <= el.y + el.h) {
+      matched = el;
+      break;
+    }
+  }
+
+  const mode = document.getElementById('picker-mode').value;
+  const scaledX = Math.round((realX / pickerVW) * 1920);
+  const scaledY = Math.round((realY / pickerVH) * 1080);
+  let finalVal = 'coord:' + scaledX + ',' + scaledY;
+  if (mode === 'css' && matched && matched.selector) {
+    finalVal = matched.selector;
+  }
+
+  const targetInput = pickerTargetField === 'click_selector'
+    ? document.getElementById('input-click-selector')
+    : document.getElementById('input-sub-click-selector');
+  targetInput.value = finalVal;
+
+  const chk = document.getElementById('chk-enable-click');
+  if (chk) chk.checked = true;
+
+  const info = matched ? (' (匹配元素: <' + matched.tag + '> ' + matched.selector + ')') : '';
+  alert('✅ 已拾取目标: ' + finalVal + info);
+  closePicker();
+}
 </script></body></html>"""
 
 with open(os.path.join(BASE_DIR, "templates/index.html"), "w", encoding="utf-8") as f:
@@ -1356,7 +1626,7 @@ except Exception as e:
     print(f"👉 你可以手动运行启动: {VENV_PY} {BASE_DIR}/app.py")
 
 print("==================================================")
-print("🎉 恭喜！矩阵自动化操盘系统（全开关可控版）已安装成功！")
+print("🎉 恭喜！矩阵自动化操盘系统（GitHub 最终完整版）已安装成功！")
 print("📌 访问地址: http://<你的服务器IP>:5000")
 print("🔑 默认登录密码: admin888")
 print("==================================================")
