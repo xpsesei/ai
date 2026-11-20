@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 print("==================================================")
-print(" Matrix 自动化综合操盘系统 - 终极整合版部署脚本 ")
+print(" Matrix 自动化综合操盘系统 - 媒体与代理增强版 ")
 print("==================================================")
 
 BASE_DIR = "/opt/auto_browser_system"
@@ -36,6 +36,7 @@ except Exception as e:
 
 print("[3/5] 正在写入后端控制核心 (app.py)...")
 app_code = r'''# -*- coding: utf-8 -*-
+import concurrent.futures
 import json
 import os
 import random
@@ -63,20 +64,22 @@ latest_screenshot = None
 
 stop_event = threading.Event()
 worker_thread = None
+proxy_fail_counts = {}
 
 DEFAULT_STATUS = {
     "is_running": False,
     "target_urls": "https://example.com",
     "stay_min": 8,
     "stay_max": 20,
-    "watch_time": 60,
+    "video_min": 30,
+    "video_max": 90,
     "interval_min": 4,
     "interval_max": 8,
     "max_runs": 0,
     "inner_page_prob": 75,
     "max_inner_pages": 2,
     "device_mode": "mixed",
-    "play_video": False,
+    "play_video": True,
     "referer": "",
     "random_browse": True,
     "human_mouse": True,
@@ -90,7 +93,7 @@ DEFAULT_STATUS = {
     "block_ads": True,
     "current_node": "待命",
     "stats": {"total": 0, "success": 0, "failed": 0},
-    "logs": ["[系统提示] 矩阵综合操盘主板已初始化（终极整合版），等待下达指令..."]
+    "logs": ["[系统提示] 矩阵综合操盘主板已初始化（媒体与代理增强版），等待下达指令..."]
 }
 
 STATUS = json.loads(json.dumps(DEFAULT_STATUS))
@@ -114,10 +117,11 @@ AD_BLOCK_KEYWORDS = [
 ]
 
 PERSIST_KEYS = [
-    "target_urls", "stay_min", "stay_max", "watch_time", "interval_min", "interval_max",
-    "max_runs", "inner_page_prob", "max_inner_pages", "device_mode", "play_video",
-    "referer", "random_browse", "human_mouse", "use_tor", "strict_proxy", "consume_proxy",
-    "proxy_api", "proxy_pool", "click_selector", "sub_click_selector", "block_ads"
+    "target_urls", "stay_min", "stay_max", "video_min", "video_max",
+    "interval_min", "interval_max", "max_runs", "inner_page_prob", "max_inner_pages",
+    "device_mode", "play_video", "referer", "random_browse", "human_mouse",
+    "use_tor", "strict_proxy", "consume_proxy", "proxy_api", "proxy_pool",
+    "click_selector", "sub_click_selector", "block_ads"
 ]
 
 
@@ -198,6 +202,76 @@ def parse_and_scale_coord(selector_str, target_w, target_h, base_w=1920, base_h=
             scaled_y = max(1, min(target_h - 1, int((orig_y / base_h) * target_h)))
             return True, scaled_x, scaled_y
     return False, 0, 0
+
+
+def normalize_proxy_entry(raw):
+    """统一标准化各种代理格式为 [scheme://][user:pass@]ip:port"""
+    s = raw.strip().strip('"\',;')
+    if not s:
+        return None
+    scheme = ""
+    if "://" in s:
+        scheme, s = s.split("://", 1)
+        scheme = scheme.lower() + "://"
+
+    # 兼容 ip:port:user:pass 四段式
+    parts = s.split(":")
+    if "@" not in s and len(parts) == 4 and parts[1].isdigit():
+        ip, port, user, pwd = parts
+        s = f"{user}:{pwd}@{ip}:{port}"
+
+    if not re.search(r'\d{1,3}(?:\.\d{1,3}){3}:\d{2,5}$', s):
+        return None
+    return f"{scheme}{s}"
+
+
+def extract_proxies_from_text(raw_text):
+    """万能代理提取器：同时兼容 JSON、逗号/空格分隔、换行文本与四段式认证"""
+    results = []
+    seen = set()
+
+    def _add(item):
+        norm = normalize_proxy_entry(item)
+        if norm and norm not in seen:
+            seen.add(norm)
+            results.append(norm)
+
+    # 1. 尝试 JSON 递归提取
+    try:
+        parsed = json.loads(raw_text)
+
+        def _walk(obj):
+            if isinstance(obj, dict):
+                ip = obj.get("ip") or obj.get("host") or obj.get("server")
+                port = obj.get("port")
+                if ip and port:
+                    user = obj.get("user") or obj.get("username")
+                    pwd = obj.get("pass") or obj.get("password")
+                    proto = obj.get("type") or obj.get("protocol") or ""
+                    prefix = f"{proto.lower()}://" if proto else ""
+                    if user and pwd:
+                        _add(f"{prefix}{user}:{pwd}@{ip}:{port}")
+                    else:
+                        _add(f"{prefix}{ip}:{port}")
+                for v in obj.values():
+                    _walk(v)
+            elif isinstance(obj, list):
+                for item in obj:
+                    _walk(item)
+            elif isinstance(obj, str):
+                for m in re.findall(r'(?:(?:https?|socks[45])://)?(?:[^\s:@/,;]+:[^\s:@/,;]+@)?\d{1,3}(?:\.\d{1,3}){3}:\d{2,5}(?::[^\s:,;]+:[^\s:,;]+)?', obj):
+                    _add(m)
+
+        _walk(parsed)
+    except Exception:
+        pass
+
+    # 2. 正则全文兜底扫描
+    pattern = r'(?:(?:https?|socks[45])://)?(?:[^\s:@/,"\';]+:[^\s:@/,"\';]+@)?\d{1,3}(?:\.\d{1,3}){3}:\d{2,5}(?::[^\s:,"\';]+:[^\s:,"\';]+)?'
+    for match in re.findall(pattern, raw_text):
+        _add(match)
+
+    return results
 
 
 def parse_proxy(proxy_str):
@@ -286,6 +360,101 @@ def simulate_human_browsing(page, profile, stay_seconds, do_scroll=True, do_mous
     capture_preview(page)
 
 
+def simulate_video_playback(page, profile, play_seconds):
+    """模拟真人在播放页起播视频并按设定时长持续播放"""
+    play_btn_selectors = [
+        ".vjs-big-play-button",
+        ".plyr__control--overlaid",
+        ".dplayer-play-icon",
+        ".art-control-play",
+        "button[aria-label*='Play' i]",
+        "button[title*='播放']"
+    ]
+
+    started = False
+    # 1. 尝试在主页面与所有 iframe 中查找并触发播放
+    frames = [page] + [f for f in page.frames if f != page.main_frame]
+    for target_frame in frames:
+        if stop_event.is_set():
+            break
+        for sel in play_btn_selectors:
+            try:
+                btn = target_frame.locator(sel).first
+                if btn.count() > 0 and btn.is_visible(timeout=800):
+                    btn.scroll_into_view_if_needed(timeout=2000)
+                    btn.click(timeout=3000)
+                    started = True
+                    add_log(f"▶️ [视频起播] 点击播放器控件 ({sel})")
+                    break
+            except Exception:
+                pass
+        if started:
+            break
+
+        try:
+            vid = target_frame.locator("video").first
+            if vid.count() > 0:
+                vid.scroll_into_view_if_needed(timeout=3000)
+                box = vid.bounding_box()
+                if box and box["width"] > 40 and box["height"] > 40:
+                    cx = box["x"] + box["width"] / 2
+                    cy = box["y"] + box["height"] / 2
+                    page.mouse.move(cx, cy, steps=random.randint(6, 12))
+                    safe_sleep(0.3)
+                    page.mouse.click(cx, cy)
+                    started = True
+                    add_log("▶️ [视频起播] 模拟点击视频画面中央")
+                # 检查是否处于暂停，必要时静音起播兜底
+                is_paused = target_frame.evaluate("""() => {
+                    const v = document.querySelector('video');
+                    if (!v) return false;
+                    if (v.paused) {
+                        v.muted = true;
+                        v.play().catch(() => {});
+                    }
+                    return v.paused;
+                }""")
+                if not is_paused:
+                    started = True
+                break
+        except Exception:
+            pass
+
+    add_log(f"🎬 [媒体播放] 模拟观看视频 {play_seconds} 秒 (检测到播放器: {started})...")
+    start_ts = time.time()
+    last_preview = 0
+    while time.time() - start_ts < play_seconds and not stop_event.is_set():
+        elapsed = int(time.time() - start_ts)
+        if elapsed - last_preview >= 10:
+            last_preview = elapsed
+            capture_preview(page)
+            # 偶尔轻微移动鼠标保持活跃状态
+            if not profile.get("touch", False) and random.random() < 0.5:
+                try:
+                    page.mouse.move(
+                        random.randint(int(profile["w"] * 0.2), int(profile["w"] * 0.8)),
+                        random.randint(int(profile["h"] * 0.2), int(profile["h"] * 0.7)),
+                        steps=8
+                    )
+                except Exception:
+                    pass
+        safe_sleep(min(2.0, max(0.2, play_seconds - (time.time() - start_ts))))
+
+    # 读取最终播放进度日志
+    for target_frame in frames:
+        try:
+            cur_t = target_frame.evaluate("""() => {
+                const v = document.querySelector('video');
+                return v ? Math.round(v.currentTime) : null;
+            }""")
+            if cur_t is not None:
+                add_log(f"⏱️ [播放结束] 视频当前进度: {cur_t} 秒")
+                break
+        except Exception:
+            pass
+    capture_preview(page)
+
+
 def perform_click(page, context, selector_str, profile, step_label="一级点击"):
     is_coord, cx, cy = parse_and_scale_coord(selector_str, profile["w"], profile["h"])
     try:
@@ -338,7 +507,8 @@ def automation_worker():
                 url_list = [u.strip() for u in raw_urls.splitlines() if u.strip()]
                 stay_min = max(2, int(STATUS["stay_min"]))
                 stay_max = max(stay_min, int(STATUS["stay_max"]))
-                watch_time = max(5, int(STATUS["watch_time"]))
+                video_min = max(5, int(STATUS["video_min"]))
+                video_max = max(video_min, int(STATUS["video_max"]))
                 interval_min = max(1, int(STATUS["interval_min"]))
                 interval_max = max(interval_min, int(STATUS["interval_max"]))
                 max_runs = max(0, int(STATUS["max_runs"]))
@@ -383,9 +553,9 @@ def automation_worker():
                         api_rotator_idx += 1
                         try:
                             add_log(f"🔄 [API轮替] 从第 {(api_rotator_idx - 1) % len(api_list) + 1}/{len(api_list)} 个接口拉取...")
-                            res = requests.get(cur_api, timeout=8)
+                            res = requests.get(cur_api, timeout=10)
                             if res.status_code == 200:
-                                fetched = [line.strip() for line in res.text.splitlines() if line.strip()]
+                                fetched = extract_proxies_from_text(res.text)
                                 added = 0
                                 with status_lock:
                                     for ip in fetched:
@@ -393,8 +563,9 @@ def automation_worker():
                                             STATUS["proxy_pool"].append(ip)
                                             added += 1
                                     proxy_pool = list(STATUS["proxy_pool"])
-                                add_log(f"📥 [API接口] 成功注入 {added} 个代理节点。")
+                                add_log(f"📥 [API接口] 解析并注入 {added} 个代理节点。")
                                 if added > 0:
+                                    save_config()
                                     break
                         except Exception as api_err:
                             add_log(f"⚠️ [API警告] 接口异常，轮替下一个: {str(api_err)[:35]}")
@@ -407,6 +578,7 @@ def automation_worker():
                     try:
                         ok, pw_cfg, country = validate_single_proxy(cand)
                         if ok:
+                            proxy_fail_counts[cand] = 0
                             proxy_config = pw_cfg
                             current_node = f"{cand} [{country}]"
                             add_log(f"✅ [链路健康] 锁定可用节点: {country}")
@@ -418,11 +590,16 @@ def automation_worker():
                             break
                         raise Exception("Bad Status")
                     except Exception:
-                        add_log(f"❌ [死节点清洗] 剥离失效代理 -> {cand}")
-                        with status_lock:
-                            if cand in STATUS["proxy_pool"]:
-                                STATUS["proxy_pool"].remove(cand)
-                            proxy_pool = list(STATUS["proxy_pool"])
+                        fails = proxy_fail_counts.get(cand, 0) + 1
+                        proxy_fail_counts[cand] = fails
+                        if fails >= 2:
+                            add_log(f"❌ [死节点清洗] 连续失效 {fails} 次，剥离代理 -> {cand}")
+                            with status_lock:
+                                if cand in STATUS["proxy_pool"]:
+                                    STATUS["proxy_pool"].remove(cand)
+                                proxy_pool = list(STATUS["proxy_pool"])
+                        else:
+                            add_log(f"⚠️ [节点抖动] 首次检测失败，暂留观察 -> {cand}")
                         retry_loop += 1
 
                 if not found_proxy and strict_proxy:
@@ -488,7 +665,7 @@ def automation_worker():
                     main_stay = random.randint(stay_min, stay_max)
                     simulate_human_browsing(page, profile, main_stay, do_scroll=random_browse, do_mouse=human_mouse)
 
-                    active_click_page = page
+                    active_page = page
                     if max_inner > 0 and random.randint(1, 100) <= inner_prob and not stop_event.is_set():
                         pages_to_visit = random.randint(1, max_inner)
                         main_domain = urlparse(target_url).netloc
@@ -527,7 +704,7 @@ def automation_worker():
                                         page.wait_for_load_state("domcontentloaded", timeout=15000)
                                     except Exception:
                                         pass
-                                    safe_sleep(2.0)
+                                    safe_sleep(2.5)
 
                                 capture_preview(page)
                                 inner_stay = random.randint(max(3, stay_min // 2), max(5, stay_max // 2))
@@ -536,17 +713,17 @@ def automation_worker():
                                 break
 
                     if click_selector and not stop_event.is_set():
-                        active_page = perform_click(active_click_page, context, click_selector, profile, "一级点击")
+                        active_page = perform_click(page, context, click_selector, profile, "一级点击")
                         simulate_human_browsing(active_page, profile, random.randint(4, 8), do_scroll=random_browse, do_mouse=human_mouse)
                         if sub_click_selector and not stop_event.is_set():
-                            sub_page = perform_click(active_page, context, sub_click_selector, profile, "二级点击")
+                            active_page = perform_click(active_page, context, sub_click_selector, profile, "二级点击")
                             safe_sleep(random.uniform(2.0, 4.0))
-                            capture_preview(sub_page)
+                            capture_preview(active_page)
 
                     if play_video and not stop_event.is_set():
-                        actual_watch = random.randint(min(10, watch_time), watch_time)
-                        add_log(f"🎬 [媒体停留] 模拟观看 {actual_watch} 秒...")
-                        safe_sleep(actual_watch)
+                        actual_watch = random.randint(video_min, video_max)
+                        simulate_video_playback(active_page, profile, actual_watch)
+
                     cycle_ok = True
             except Exception as e:
                 add_log(f"💥 [引擎报错] {str(e)[:60]}")
@@ -638,7 +815,8 @@ def control():
             "target_urls": d.get("urls", "").strip(),
             "stay_min": safe_int(d.get("stay_min"), 8),
             "stay_max": safe_int(d.get("stay_max"), 20),
-            "watch_time": safe_int(d.get("watch_time"), 60),
+            "video_min": safe_int(d.get("video_min"), 30),
+            "video_max": safe_int(d.get("video_max"), 90),
             "interval_min": safe_int(d.get("interval_min"), 4),
             "interval_max": safe_int(d.get("interval_max"), 8),
             "max_runs": safe_int(d.get("max_runs"), 0),
@@ -681,16 +859,16 @@ def control():
 @login_required
 def inject_ips():
     paste_ips = request.form.get("ips", "")
+    parsed = extract_proxies_from_text(paste_ips)
     added = 0
-    if paste_ips:
+    if parsed:
         with status_lock:
-            for line in paste_ips.splitlines():
-                line = line.strip()
-                if line and line not in STATUS["proxy_pool"]:
-                    STATUS["proxy_pool"].append(line)
+            for ip in parsed:
+                if ip not in STATUS["proxy_pool"]:
+                    STATUS["proxy_pool"].append(ip)
                     added += 1
         save_config()
-        add_log(f"📥 [手动注入] 新增 {added} 个代理节点。")
+        add_log(f"📥 [手动注入] 智能解析并新增 {added} 个代理节点。")
     return jsonify({"status": "success", "added": added})
 
 
@@ -703,21 +881,28 @@ def check_proxies():
         if not pool:
             add_log("ℹ️ [测速清洗] 当前代理池为空。")
             return
-        add_log(f"🔍 [测速清洗] 开始批量检测 {len(pool)} 个节点...")
+        add_log(f"🔍 [并发测速] 启动 15 线程批量检测 {len(pool)} 个节点...")
         alive = []
-        for cand in pool:
+
+        def _test(cand):
             try:
                 ok, _, _ = validate_single_proxy(cand)
-                if ok:
-                    alive.append(cand)
+                return cand if ok else None
             except Exception:
-                pass
+                return None
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=15) as executor:
+            for res in executor.map(_test, pool):
+                if res:
+                    alive.append(res)
+
         with status_lock:
             STATUS["proxy_pool"] = alive
         save_config()
         add_log(f"✅ [测速完成] 保留有效节点 {len(alive)}/{len(pool)} 个。")
+
     threading.Thread(target=_runner, daemon=True).start()
-    return jsonify({"status": "started", "msg": "后台已开始批量测速清洗，请查看日志输出"})
+    return jsonify({"status": "started", "msg": "后台已开启 15 线程并发测速清洗，请查看日志"})
 
 
 @app.route("/export_proxies")
@@ -753,15 +938,15 @@ def upload_txt():
         return jsonify({"status": "failed", "msg": "未找到上传文件"})
     try:
         content = request.files["file"].read().decode("utf-8", errors="ignore")
+        parsed = extract_proxies_from_text(content)
         count = 0
         with status_lock:
-            for line in content.splitlines():
-                line = line.strip()
-                if line and line not in STATUS["proxy_pool"]:
-                    STATUS["proxy_pool"].append(line)
+            for ip in parsed:
+                if ip not in STATUS["proxy_pool"]:
+                    STATUS["proxy_pool"].append(ip)
                     count += 1
         save_config()
-        add_log(f"📂 [文件导入] 从 TXT 成功注入 {count} 个节点。")
+        add_log(f"📂 [文件导入] 智能解析并注入 {count} 个节点。")
         return jsonify({"status": "success", "msg": f"成功注入 {count} 个独立节点"})
     except Exception as e:
         return jsonify({"status": "failed", "msg": str(e)})
@@ -824,7 +1009,7 @@ textarea { height:75px; }
 </style></head>
 <body>
 <div class="header-bar">
-  <div><h1>矩阵自动化综合操盘控制台 (终极整合版)</h1>
+  <div><h1>矩阵自动化综合操盘控制台 (媒体与代理增强版)</h1>
   <span>● 状态: <span id="run-status" style="font-weight:bold;">检测中...</span> | 当前节点: <span id="current-node" style="color:#00ccff;">待命</span></span></div>
   <a href="/logout" style="color:#ff3333; font-weight:bold; text-decoration:none;">[安全登出]</a>
 </div>
@@ -837,15 +1022,23 @@ textarea { height:75px; }
 <div class="grid">
   <div class="card"><h3>操盘战略与拟人化配置</h3>
     <form id="control-form">
-      <p>目标 URL 列表 (每行一个，支持多网址随机轮询):<br><textarea name="urls" required>{{ cfg.target_urls }}</textarea></p>
+      <p>目标 URL 列表 (支持首页或直接填播放页，每行一个随机轮询):<br><textarea name="urls" required>{{ cfg.target_urls }}</textarea></p>
       <div class="row-3">
-        <p>单页停留 (最小/最大秒):<br><span style="display:flex; gap:4px;"><input type="number" name="stay_min" value="{{ cfg.stay_min }}"><input type="number" name="stay_max" value="{{ cfg.stay_max }}"></span></p>
+        <p>页面浏览 (最小/最大秒):<br><span style="display:flex; gap:4px;"><input type="number" name="stay_min" value="{{ cfg.stay_min }}"><input type="number" name="stay_max" value="{{ cfg.stay_max }}"></span></p>
+        <p>视频播放 (最小/最大秒):<br><span style="display:flex; gap:4px;"><input type="number" name="video_min" value="{{ cfg.video_min }}"><input type="number" name="video_max" value="{{ cfg.video_max }}"></span></p>
         <p>轮次冷却 (最小/最大秒):<br><span style="display:flex; gap:4px;"><input type="number" name="interval_min" value="{{ cfg.interval_min }}"><input type="number" name="interval_max" value="{{ cfg.interval_max }}"></span></p>
-        <p>最大轮次 (0=无限):<br><input type="number" name="max_runs" value="{{ cfg.max_runs }}"></p>
       </div>
       <div class="row-3">
         <p>内页深挖概率 (%):<br><input type="number" name="inner_page_prob" value="{{ cfg.inner_page_prob }}"></p>
-        <p>最多逛内页数:<br><input type="number" name="max_inner_pages" value="{{ cfg.max_inner_pages }}"></p>
+        <p>最多逛内页数 (0=不跳):<br><input type="number" name="max_inner_pages" value="{{ cfg.max_inner_pages }}"></p>
+        <p>最大轮次 (0=无限):<br><input type="number" name="max_runs" value="{{ cfg.max_runs }}"></p>
+      </div>
+      <div class="row-2">
+        <p>一级点击目标 (CSS 或 coord:X,Y):<br><input type="text" name="click_selector" value="{{ cfg.click_selector }}" placeholder="可选: coord:960,1020"></p>
+        <p>二级点击目标 (可选):<br><input type="text" name="sub_click_selector" value="{{ cfg.sub_click_selector }}"></p>
+      </div>
+      <div class="row-2">
+        <p>自定义 Referer (留空自动权重分流):<br><input type="text" name="referer" value="{{ cfg.referer }}" placeholder="https://www.google.com"></p>
         <p>设备指纹模式:<br>
           <select name="device_mode">
             <option value="mixed" {% if cfg.device_mode == 'mixed' %}selected{% endif %}>PC+移动混合</option>
@@ -854,19 +1047,11 @@ textarea { height:75px; }
           </select>
         </p>
       </div>
-      <div class="row-2">
-        <p>一级点击目标 (CSS 或 coord:X,Y):<br><input type="text" name="click_selector" value="{{ cfg.click_selector }}" placeholder="例如: coord:960,1020"></p>
-        <p>二级点击目标 (可选):<br><input type="text" name="sub_click_selector" value="{{ cfg.sub_click_selector }}"></p>
-      </div>
-      <div class="row-2">
-        <p>自定义 Referer (留空自动权重分流):<br><input type="text" name="referer" value="{{ cfg.referer }}" placeholder="https://www.google.com"></p>
-        <p>媒体额外停留上限 (秒):<br><input type="number" name="watch_time" value="{{ cfg.watch_time }}"></p>
-      </div>
       <p>拟人行为与网络开关：<br>
+        <label style="color:#00ff66; font-weight:bold;"><input type="checkbox" name="vid" value="true" {% if cfg.play_video %}checked{% endif %}> 自动识别播放器并模拟播放视频 (按设定播放秒数)</label><br>
         <label><input type="checkbox" name="browse" value="true" {% if cfg.random_browse %}checked{% endif %}> 启用分段平滑滚动与回看阅读</label><br>
         <label><input type="checkbox" name="human_mouse" value="true" {% if cfg.human_mouse %}checked{% endif %}> 启用随机鼠标轨迹与元素悬停</label><br>
-        <label style="color:#ffaa00;"><input type="checkbox" name="block_ads" value="true" {% if cfg.block_ads %}checked{% endif %}> 开启高能耗广告/统计脚本拦截</label><br>
-        <label><input type="checkbox" name="vid" value="true" {% if cfg.play_video %}checked{% endif %}> 启用额外媒体观看停留</label><br>
+        <label style="color:#ffaa00;"><input type="checkbox" name="block_ads" value="true" {% if cfg.block_ads %}checked{% endif %}> 开启高能耗第三方脚本拦截</label><br>
         <label><input type="checkbox" name="tor" value="true" {% if cfg.use_tor %}checked{% endif %}> 强制走 Tor (127.0.0.1:9050) 通道</label><br>
         <label style="color:#00ccff;"><input type="checkbox" name="strict_proxy" value="true" {% if cfg.strict_proxy %}checked{% endif %}> 严格代理模式 (无可用代理时不回退直连)</label><br>
         <label style="color:#00ccff;"><input type="checkbox" name="consume_proxy" value="true" {% if cfg.consume_proxy %}checked{% endif %}> 代理用后即焚 (每轮用完移除，少于3个自动拉取新IP)</label>
@@ -875,14 +1060,14 @@ textarea { height:75px; }
       <button type="button" class="btn btn-stop" onclick="sendControl('stop')">紧急全面停滞</button>
     </form>
   </div>
-  <div class="card"><h3>代理 IP 资源池管理</h3>
-    <p>API 提取链路 (每行一个接口，自动轮替拉取)：<br><textarea id="api-url" placeholder="http://api1.com/get&#10;http://api2.com/get">{{ cfg.proxy_api }}</textarea></p>
-    <p>手动批量粘贴 IP (支持 ip:port / user:pass@ip:port / socks5://):<br><textarea id="paste-ips" placeholder="12.34.56.78:8080"></textarea></p>
+  <div class="card"><h3>代理 IP 资源池管理 (全协议/JSON兼容)</h3>
+    <p>API 提取链路 (每行一个接口，自动轮替，兼容 JSON/文本)：<br><textarea id="api-url" placeholder="http://api1.com/get&#10;http://api2.com/get">{{ cfg.proxy_api }}</textarea></p>
+    <p>手动批量粘贴 IP (兼容 ip:port / ip:port:user:pass / socks5://)：<br><textarea id="paste-ips" placeholder="12.34.56.78:8080&#10;socks5://user:pass@1.2.3.4:1080"></textarea></p>
     <button type="button" class="btn" onclick="injectIPs()">注入文本池</button>
-    <button type="button" class="btn btn-warn" onclick="checkProxies()">测速清洗</button>
+    <button type="button" class="btn btn-warn" onclick="checkProxies()">并发测速清洗</button>
     <button type="button" class="btn" onclick="window.location.href='/export_proxies'">导出存活</button>
     <button type="button" class="btn btn-stop" onclick="clearIPs()">清空</button>
-    <p style="margin-top:10px;">TXT 批量导入: <input type="file" id="txt-file" accept=".txt" style="width:auto;"> <button type="button" class="btn" onclick="uploadTxt()">上传</button></p>
+    <p style="margin-top:10px;">TXT/JSON 批量导入: <input type="file" id="txt-file" accept=".txt,.json,.csv" style="width:auto;"> <button type="button" class="btn" onclick="uploadTxt()">上传</button></p>
     <hr style="border-color:#333; margin:15px 0;">
     <div style="display:flex; justify-content:space-between; align-items:center;"><h3 style="margin:0;">实时画面预览</h3><button type="button" class="btn btn-warn" onclick="refreshPreview()">刷新画面</button></div>
     <div class="preview-box"><img id="live-preview" src="" alt="运行后点击刷新查看无头浏览器实时画面" style="color:#666; font-size:12px;"></div>
@@ -929,7 +1114,7 @@ function clearIPs() { if (confirm('确定清空当前IP资源池吗？')) fetch(
 function clearLogs() { fetch('/clear_logs', { method: 'POST' }).then(() => updateStatus()); }
 function uploadTxt() {
   const fi = document.getElementById('txt-file');
-  if (fi.files.length === 0) { alert('请选择 TXT 文件'); return; }
+  if (fi.files.length === 0) { alert('请选择文件'); return; }
   const fd = new FormData(); fd.append('file', fi.files[0]);
   fetch('/upload_txt', { method: 'POST', body: fd }).then(r => r.json()).then(d => { alert(d.msg); fi.value = ""; updateStatus(); });
 }
@@ -966,7 +1151,7 @@ except Exception as e:
     print(f"👉 你可以手动运行启动: {VENV_PY} {BASE_DIR}/app.py")
 
 print("==================================================")
-print("🎉 恭喜！矩阵自动化操盘系统（终极整合版）已安装成功！")
+print("🎉 恭喜！矩阵自动化操盘系统（媒体与代理增强版）已安装成功！")
 print("📌 访问地址: http://<你的服务器IP>:5000")
 print("🔑 默认登录密码: admin888")
 print("==================================================")
