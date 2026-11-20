@@ -6,7 +6,7 @@ import subprocess
 import sys
 
 print("==================================================")
-print(" Matrix 自动化综合操盘系统 - GitHub 终极发布版 ")
+print(" Matrix 自动化综合操盘系统 - 独立媒体全兼容版 ")
 print("==================================================")
 
 BASE_DIR = "/opt/auto_browser_system"
@@ -70,6 +70,8 @@ proxy_fail_counts = {}
 DEFAULT_STATUS = {
     "is_running": False,
     "target_urls": "https://example.com",
+    "video_urls": "",
+    "video_only": False,
     "load_mode": "full",
     "load_timeout": 45,
     "render_wait": 3,
@@ -99,7 +101,7 @@ DEFAULT_STATUS = {
     "block_ads": True,
     "current_node": "待命",
     "stats": {"total": 0, "success": 0, "failed": 0},
-    "logs": ["[系统提示] 矩阵综合操盘主板已初始化（GitHub 终极发布版），等待下达指令..."]
+    "logs": ["[系统提示] 矩阵综合操盘主板已初始化（独立媒体全兼容版），等待下达指令..."]
 }
 
 STATUS = json.loads(json.dumps(DEFAULT_STATUS))
@@ -123,10 +125,10 @@ AD_BLOCK_KEYWORDS = [
 ]
 
 PERSIST_KEYS = [
-    "target_urls", "load_mode", "load_timeout", "render_wait", "stay_min", "stay_max",
-    "video_min", "video_max", "interval_min", "interval_max", "max_runs",
-    "inner_page_prob", "max_inner_pages", "device_mode", "play_video", "referer",
-    "random_browse", "human_mouse", "route_mode", "tunnel_proxy", "tor_new_ip",
+    "target_urls", "video_urls", "video_only", "load_mode", "load_timeout", "render_wait",
+    "stay_min", "stay_max", "video_min", "video_max", "interval_min", "interval_max",
+    "max_runs", "inner_page_prob", "max_inner_pages", "device_mode", "play_video",
+    "referer", "random_browse", "human_mouse", "route_mode", "tunnel_proxy", "tor_new_ip",
     "strict_proxy", "consume_proxy", "proxy_api", "proxy_pool", "click_selector",
     "sub_click_selector", "block_ads"
 ]
@@ -212,7 +214,6 @@ def parse_and_scale_coord(selector_str, target_w, target_h, base_w=1920, base_h=
 
 
 def normalize_proxy_entry(raw):
-    """统一标准化代理格式，支持纯 IP 与域名隧道网关"""
     s = raw.strip().strip('"\',;')
     if not s:
         return None
@@ -233,7 +234,6 @@ def normalize_proxy_entry(raw):
 
 
 def extract_proxies_from_text(raw_text):
-    """万能代理提取器：同时兼容 JSON、逗号/空格/换行文本、域名网关与四段式"""
     results = []
     seen = set()
 
@@ -375,72 +375,149 @@ def simulate_human_browsing(page, profile, stay_seconds, do_scroll=True, do_mous
     capture_preview(page)
 
 
-def simulate_video_playback(page, profile, play_seconds):
-    """模拟真人在播放页起播视频并按设定时长持续播放"""
+def _try_trigger_player_in_frame(page, frame):
+    """在指定 frame 内尝试多种主流播放器控件与 video 起播"""
     play_btn_selectors = [
         ".vjs-big-play-button",
+        ".vjs-play-control",
         ".plyr__control--overlaid",
+        "[data-plyr='play']",
         ".dplayer-play-icon",
+        ".dplayer-video-wrap",
         ".art-control-play",
+        ".art-state",
+        ".jw-icon-display",
+        ".jw-icon-playback",
+        ".xgplayer-start",
+        ".xgplayer-play",
+        ".prism-big-play-btn",
+        ".prism-play-btn",
+        ".tcp-play-toggle",
+        ".ytp-large-play-button",
+        ".ytp-play-button",
+        "[data-play-pause]",
+        "[class*='play-btn' i]",
+        "[class*='playBtn' i]",
+        "[class*='start-btn' i]",
         "button[aria-label*='Play' i]",
-        "button[title*='播放']"
+        "button[aria-label*='播放']",
+        "button[title*='播放']",
+        "button[title*='Play' i]"
     ]
 
-    started = False
-    frames = [page] + [f for f in page.frames if f != page.main_frame]
-    for target_frame in frames:
-        if stop_event.is_set():
-            break
-        for sel in play_btn_selectors:
-            try:
-                btn = target_frame.locator(sel).first
-                if btn.count() > 0 and btn.is_visible(timeout=800):
-                    btn.scroll_into_view_if_needed(timeout=2000)
-                    btn.click(timeout=3000)
-                    started = True
-                    add_log(f"▶️ [视频起播] 点击播放器控件 ({sel})")
-                    break
-            except Exception:
-                pass
-        if started:
-            break
-
+    for sel in play_btn_selectors:
         try:
-            vid = target_frame.locator("video").first
-            if vid.count() > 0:
-                vid.scroll_into_view_if_needed(timeout=3000)
-                box = vid.bounding_box()
-                if box and box["width"] > 40 and box["height"] > 40:
-                    cx = box["x"] + box["width"] / 2
-                    cy = box["y"] + box["height"] / 2
-                    page.mouse.move(cx, cy, steps=random.randint(6, 12))
-                    safe_sleep(0.3)
-                    page.mouse.click(cx, cy)
-                    started = True
-                    add_log("▶️ [视频起播] 模拟点击视频画面中央")
-                is_paused = target_frame.evaluate("""() => {
-                    const v = document.querySelector('video');
-                    if (!v) return false;
-                    if (v.paused) {
-                        v.muted = true;
-                        v.play().catch(() => {});
-                    }
-                    return v.paused;
-                }""")
-                if not is_paused:
-                    started = True
-                break
+            btn = frame.locator(sel).first
+            if btn.count() > 0 and btn.is_visible(timeout=500):
+                btn.scroll_into_view_if_needed(timeout=2000)
+                box = btn.bounding_box()
+                if box and box["width"] > 5 and box["height"] > 5:
+                    page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2, steps=8)
+                    safe_sleep(0.2)
+                    page.mouse.click(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                else:
+                    btn.click(timeout=2500)
+                add_log(f"▶️ [播放器起播] 触发控件 -> {sel}")
+                safe_sleep(1.0)
+                return True
         except Exception:
             pass
 
-    add_log(f"🎬 [媒体播放] 模拟观看视频 {play_seconds} 秒 (检测到播放器: {started})...")
+    try:
+        vid = frame.locator("video").first
+        if vid.count() > 0:
+            vid.scroll_into_view_if_needed(timeout=2500)
+            box = vid.bounding_box()
+            if box and box["width"] > 40 and box["height"] > 40:
+                cx = box["x"] + box["width"] / 2
+                cy = box["y"] + box["height"] / 2
+                page.mouse.move(cx, cy, steps=random.randint(6, 12))
+                safe_sleep(0.25)
+                page.mouse.click(cx, cy)
+                add_log("▶️ [播放器起播] 点击 <video> 画面中央")
+                safe_sleep(0.8)
+
+            res = frame.evaluate("""() => {
+                const v = document.querySelector('video');
+                if (!v) return null;
+                if (v.paused) {
+                    v.muted = true;
+                    v.play().catch(() => {});
+                }
+                return {paused: v.paused, currentTime: v.currentTime};
+            }""")
+            if res is not None:
+                return True
+    except Exception:
+        pass
+    return False
+
+
+def simulate_video_playback(page, profile, play_seconds):
+    """全播放器兼容的拟人视频播放：扫描主页面+所有iframe，控时播放并防暂停守护"""
+    add_log(f"🎬 [视频任务] 准备在播放页模拟观看 {play_seconds} 秒...")
+    safe_sleep(1.5)
+
+    triggered = False
+    for frame in list(page.frames):
+        if stop_event.is_set():
+            break
+        if _try_trigger_player_in_frame(page, frame):
+            triggered = True
+            break
+
+    # 若未直接找到 video/按钮，兜底点击页面上最大的播放器容器或 iframe 中心
+    if not triggered and not stop_event.is_set():
+        try:
+            target_box = page.evaluate("""() => {
+                const candidates = Array.from(document.querySelectorAll('iframe, [id*="player" i], [class*="player" i], [id*="video" i]'));
+                let best = null;
+                let maxArea = 0;
+                for (const el of candidates) {
+                    const r = el.getBoundingClientRect();
+                    const area = r.width * r.height;
+                    if (r.width >= 200 && r.height >= 120 && area > maxArea) {
+                        maxArea = area;
+                        best = {x: r.left + r.width / 2, y: r.top + r.height / 2, top: r.top};
+                    }
+                }
+                return best;
+            }""")
+            if target_box:
+                page.evaluate(f"window.scrollTo({{top: Math.max(0, {target_box['top']} - 100), behavior: 'smooth'}})")
+                safe_sleep(0.6)
+                page.mouse.move(target_box["x"], target_box["y"], steps=10)
+                safe_sleep(0.3)
+                page.mouse.click(target_box["x"], target_box["y"])
+                triggered = True
+                add_log("▶️ [播放器兜底] 点击最大播放器/iframe 容器中央")
+        except Exception:
+            pass
+
+    capture_preview(page)
     start_ts = time.time()
-    last_preview = 0
+    last_check = 0
     while time.time() - start_ts < play_seconds and not stop_event.is_set():
         elapsed = int(time.time() - start_ts)
-        if elapsed - last_preview >= 10:
-            last_preview = elapsed
+        if elapsed - last_check >= 8:
+            last_check = elapsed
             capture_preview(page)
+            # 播放防暂停守护：若检测到暂停则自动续播
+            for frame in list(page.frames):
+                try:
+                    state = frame.evaluate("""() => {
+                        const v = document.querySelector('video');
+                        if (!v) return null;
+                        if (v.paused && !v.ended) {
+                            v.muted = true;
+                            v.play().catch(() => {});
+                        }
+                        return Math.round(v.currentTime);
+                    }""")
+                    if state is not None:
+                        break
+                except Exception:
+                    pass
             if not profile.get("touch", False) and random.random() < 0.5:
                 try:
                     page.mouse.move(
@@ -452,14 +529,14 @@ def simulate_video_playback(page, profile, play_seconds):
                     pass
         safe_sleep(min(2.0, max(0.2, play_seconds - (time.time() - start_ts))))
 
-    for target_frame in frames:
+    for frame in list(page.frames):
         try:
-            cur_t = target_frame.evaluate("""() => {
+            cur_t = frame.evaluate("""() => {
                 const v = document.querySelector('video');
                 return v ? Math.round(v.currentTime) : null;
             }""")
             if cur_t is not None:
-                add_log(f"⏱️ [播放结束] 视频当前进度: {cur_t} 秒")
+                add_log(f"⏱️ [播放完成] 视频进度达到: {cur_t} 秒")
                 break
         except Exception:
             pass
@@ -516,6 +593,9 @@ def automation_worker():
             with status_lock:
                 raw_urls = STATUS["target_urls"]
                 url_list = [u.strip() for u in raw_urls.splitlines() if u.strip()]
+                raw_v_urls = STATUS.get("video_urls", "")
+                video_list = [u.strip() for u in raw_v_urls.splitlines() if u.strip()]
+                video_only = STATUS.get("video_only", False)
                 load_mode = STATUS.get("load_mode", "full")
                 load_timeout_ms = max(10, int(STATUS.get("load_timeout", 45))) * 1000
                 render_wait = max(0, int(STATUS.get("render_wait", 3)))
@@ -546,14 +626,10 @@ def automation_worker():
             if max_runs > 0 and run_counter >= max_runs:
                 add_log(f"🏁 [任务达标] 已完成设定的 {max_runs} 轮任务，自动停机。")
                 break
-            if not url_list:
-                add_log("⚠️ [等待配置] 目标 URL 列表为空，休眠 5 秒...")
+            if not url_list and not video_list:
+                add_log("⚠️ [等待配置] 普通 URL 与播放页 URL 均为空，休眠 5 秒...")
                 safe_sleep(5)
                 continue
-
-            target_url = random.choice(url_list)
-            if not target_url.startswith(("http://", "https://")):
-                target_url = "https://" + target_url
 
             proxy_config = None
             current_node = "本机主线直连"
@@ -659,7 +735,7 @@ def automation_worker():
                 with sync_playwright() as p:
                     browser = p.chromium.launch(
                         headless=True, proxy=proxy_config,
-                        args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--disable-blink-features=AutomationControlled"]
+                        args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--disable-blink-features=AutomationControlled", "--autoplay-policy=no-user-gesture-required"]
                     )
                     context = browser.new_context(
                         viewport={"width": profile["w"], "height": profile["h"]},
@@ -670,8 +746,12 @@ def automation_worker():
                     page = context.new_page()
                     page.set_default_timeout(25000)
 
+                    scope_url = (video_list[0] if video_only and video_list else (url_list[0] if url_list else video_list[0]))
+                    if not scope_url.startswith(("http://", "https://")):
+                        scope_url = "https://" + scope_url
+
                     if block_ads:
-                        target_netloc = urlparse(target_url).netloc.lower()
+                        target_netloc = urlparse(scope_url).netloc.lower()
                         def handle_route(route):
                             try:
                                 req_url = route.request.url.lower()
@@ -686,81 +766,107 @@ def automation_worker():
                         page.route("**/*", handle_route)
 
                     wait_strategy = "load" if load_mode == "full" else "domcontentloaded"
-                    add_log(f"🎯 [访问入口] 加载 Page A ({wait_strategy}, 超时{load_timeout_ms//1000}s): {target_url}")
                     traffic_referer = select_traffic_channel()
-                    if traffic_referer and traffic_referer != "direct_access":
-                        page.goto(target_url, referer=traffic_referer, wait_until=wait_strategy, timeout=load_timeout_ms)
-                    else:
-                        page.goto(target_url, wait_until=wait_strategy, timeout=load_timeout_ms)
-                    if load_mode == "full":
-                        try:
-                            page.wait_for_load_state("networkidle", timeout=10000)
-                        except Exception:
-                            pass
-                    if render_wait > 0:
-                        safe_sleep(render_wait)
-                    capture_preview(page)
-
-                    main_stay = random.randint(stay_min, stay_max)
-                    simulate_human_browsing(page, profile, main_stay, do_scroll=random_browse, do_mouse=human_mouse)
-
                     active_page = page
-                    if max_inner > 0 and random.randint(1, 100) <= inner_prob and not stop_event.is_set():
-                        pages_to_visit = random.randint(1, max_inner)
-                        main_domain = urlparse(target_url).netloc
-                        visited = {target_url.rstrip("/")}
-                        for idx in range(pages_to_visit):
-                            if stop_event.is_set():
-                                break
+
+                    # 模块一：常规网站游览（若未开启仅播放模式且填有目标 URL）
+                    if not video_only and url_list:
+                        target_url = random.choice(url_list)
+                        if not target_url.startswith(("http://", "https://")):
+                            target_url = "https://" + target_url
+
+                        add_log(f"🎯 [访问入口] 加载 Page A ({wait_strategy}, 超时{load_timeout_ms//1000}s): {target_url}")
+                        if traffic_referer and traffic_referer != "direct_access":
+                            page.goto(target_url, referer=traffic_referer, wait_until=wait_strategy, timeout=load_timeout_ms)
+                        else:
+                            page.goto(target_url, wait_until=wait_strategy, timeout=load_timeout_ms)
+                        if load_mode == "full":
                             try:
-                                all_links = page.evaluate("Array.from(document.querySelectorAll('a')).map(a => a.href)")
-                                internal_links = [
-                                    l for l in all_links
-                                    if l and l.startswith("http") and urlparse(l).netloc == main_domain
-                                    and l.rstrip("/") not in visited and not l.rstrip("/").endswith("index.html")
-                                ]
-                                if internal_links:
-                                    chosen_inner = random.choice(internal_links)
-                                    visited.add(chosen_inner.rstrip("/"))
-                                    add_log(f"🔗 [深度游览 {idx+1}/{pages_to_visit}] -> {chosen_inner[:60]}")
-                                    page.goto(chosen_inner, wait_until=wait_strategy, timeout=load_timeout_ms)
-                                    if render_wait > 0:
-                                        safe_sleep(render_wait)
-                                else:
-                                    candidates = page.locator("main div.cursor-pointer, .grid .cursor-pointer")
-                                    cnt = candidates.count()
-                                    if cnt == 0:
-                                        candidates = page.locator("main button:not([disabled])")
-                                        cnt = candidates.count()
-                                    if cnt == 0:
-                                        break
-                                    pick_idx = random.randint(0, min(cnt - 1, 20))
-                                    target_el = candidates.nth(pick_idx)
-                                    target_el.scroll_into_view_if_needed(timeout=5000)
-                                    safe_sleep(random.uniform(0.4, 1.0))
-                                    add_log(f"🖱️ [JS内页点击 {idx+1}/{pages_to_visit}] 触发卡片/按钮跳转 (第 {pick_idx+1} 项)")
-                                    target_el.click(timeout=8000)
-                                    try:
-                                        page.wait_for_load_state(wait_strategy, timeout=15000)
-                                    except Exception:
-                                        pass
-                                    safe_sleep(max(2, render_wait))
-
-                                capture_preview(page)
-                                inner_stay = random.randint(max(3, stay_min // 2), max(5, stay_max // 2))
-                                simulate_human_browsing(page, profile, inner_stay, do_scroll=random_browse, do_mouse=human_mouse)
+                                page.wait_for_load_state("networkidle", timeout=10000)
                             except Exception:
-                                break
+                                pass
+                        if render_wait > 0:
+                            safe_sleep(render_wait)
+                        capture_preview(page)
 
-                    if click_selector and not stop_event.is_set():
-                        active_page = perform_click(page, context, click_selector, profile, "一级点击")
-                        simulate_human_browsing(active_page, profile, random.randint(4, 8), do_scroll=random_browse, do_mouse=human_mouse)
-                        if sub_click_selector and not stop_event.is_set():
-                            active_page = perform_click(active_page, context, sub_click_selector, profile, "二级点击")
-                            safe_sleep(random.uniform(2.0, 4.0))
-                            capture_preview(active_page)
+                        main_stay = random.randint(stay_min, stay_max)
+                        simulate_human_browsing(page, profile, main_stay, do_scroll=random_browse, do_mouse=human_mouse)
 
-                    if play_video and not stop_event.is_set():
+                        if max_inner > 0 and random.randint(1, 100) <= inner_prob and not stop_event.is_set():
+                            pages_to_visit = random.randint(1, max_inner)
+                            main_domain = urlparse(target_url).netloc
+                            visited = {target_url.rstrip("/")}
+                            for idx in range(pages_to_visit):
+                                if stop_event.is_set():
+                                    break
+                                try:
+                                    all_links = page.evaluate("Array.from(document.querySelectorAll('a')).map(a => a.href)")
+                                    internal_links = [
+                                        l for l in all_links
+                                        if l and l.startswith("http") and urlparse(l).netloc == main_domain
+                                        and l.rstrip("/") not in visited and not l.rstrip("/").endswith("index.html")
+                                    ]
+                                    if internal_links:
+                                        chosen_inner = random.choice(internal_links)
+                                        visited.add(chosen_inner.rstrip("/"))
+                                        add_log(f"🔗 [深度游览 {idx+1}/{pages_to_visit}] -> {chosen_inner[:60]}")
+                                        page.goto(chosen_inner, wait_until=wait_strategy, timeout=load_timeout_ms)
+                                        if render_wait > 0:
+                                            safe_sleep(render_wait)
+                                    else:
+                                        candidates = page.locator("main div.cursor-pointer, .grid .cursor-pointer")
+                                        cnt = candidates.count()
+                                        if cnt == 0:
+                                            candidates = page.locator("main button:not([disabled])")
+                                            cnt = candidates.count()
+                                        if cnt == 0:
+                                            break
+                                        pick_idx = random.randint(0, min(cnt - 1, 20))
+                                        target_el = candidates.nth(pick_idx)
+                                        target_el.scroll_into_view_if_needed(timeout=5000)
+                                        safe_sleep(random.uniform(0.4, 1.0))
+                                        add_log(f"🖱️ [JS内页点击 {idx+1}/{pages_to_visit}] 触发卡片/按钮跳转 (第 {pick_idx+1} 项)")
+                                        target_el.click(timeout=8000)
+                                        try:
+                                            page.wait_for_load_state(wait_strategy, timeout=15000)
+                                        except Exception:
+                                            pass
+                                        safe_sleep(max(2, render_wait))
+
+                                    capture_preview(page)
+                                    inner_stay = random.randint(max(3, stay_min // 2), max(5, stay_max // 2))
+                                    simulate_human_browsing(page, profile, inner_stay, do_scroll=random_browse, do_mouse=human_mouse)
+                                except Exception:
+                                    break
+
+                        if click_selector and not stop_event.is_set():
+                            active_page = perform_click(page, context, click_selector, profile, "一级点击")
+                            simulate_human_browsing(active_page, profile, random.randint(4, 8), do_scroll=random_browse, do_mouse=human_mouse)
+                            if sub_click_selector and not stop_event.is_set():
+                                active_page = perform_click(active_page, context, sub_click_selector, profile, "二级点击")
+                                safe_sleep(random.uniform(2.0, 4.0))
+                                capture_preview(active_page)
+
+                    # 模块二：独立视频播放任务
+                    if (video_only or play_video) and not stop_event.is_set():
+                        if video_list:
+                            v_url = random.choice(video_list)
+                            if not v_url.startswith(("http://", "https://")):
+                                v_url = "https://" + v_url
+                            add_log(f"📺 [独立播放页] 正在进入: {v_url}")
+                            if traffic_referer and traffic_referer != "direct_access":
+                                page.goto(v_url, referer=traffic_referer, wait_until=wait_strategy, timeout=load_timeout_ms)
+                            else:
+                                page.goto(v_url, wait_until=wait_strategy, timeout=load_timeout_ms)
+                            if load_mode == "full":
+                                try:
+                                    page.wait_for_load_state("networkidle", timeout=10000)
+                                except Exception:
+                                    pass
+                            if render_wait > 0:
+                                safe_sleep(render_wait)
+                            active_page = page
+
                         actual_watch = random.randint(video_min, video_max)
                         simulate_video_playback(active_page, profile, actual_watch)
 
@@ -853,6 +959,8 @@ def control():
     with status_lock:
         STATUS.update({
             "target_urls": d.get("urls", "").strip(),
+            "video_urls": d.get("video_urls", "").strip(),
+            "video_only": d.get("video_only") == "true",
             "load_mode": d.get("load_mode", "full"),
             "load_timeout": safe_int(d.get("load_timeout"), 45),
             "render_wait": safe_int(d.get("render_wait"), 3),
@@ -1046,7 +1154,7 @@ h1, h3 { color:#00ff66; margin-top:0; }
 input[type="text"], input[type="number"], select, textarea { background:#000; border:1px solid #444; color:#fff; padding:6px; width:98%; font-family:monospace; box-sizing:border-box; }
 .row-2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
 .row-3 { display:grid; grid-template-columns: 1fr 1fr 1fr; gap:10px; }
-textarea { height:75px; }
+textarea { height:68px; }
 .log-box { background:#020202; border:1px solid #ffaa00; height:320px; overflow-y:auto; padding:10px; font-size:12px; color:#ffaa00; white-space:pre-wrap; }
 .preview-box { background:#000; border:1px solid #333; min-height:180px; display:flex; align-items:center; justify-content:center; margin-top:10px; border-radius:4px; overflow:hidden; }
 .preview-box img { max-width:100%; max-height:260px; display:block; }
@@ -1054,7 +1162,7 @@ textarea { height:75px; }
 </style></head>
 <body>
 <div class="header-bar">
-  <div><h1>矩阵自动化综合操盘控制台 (GitHub 终极发布版)</h1>
+  <div><h1>矩阵自动化综合操盘控制台 (独立媒体全兼容版)</h1>
   <span>● 状态: <span id="run-status" style="font-weight:bold;">检测中...</span> | 当前节点: <span id="current-node" style="color:#00ccff;">待命</span></span></div>
   <a href="/logout" style="color:#ff3333; font-weight:bold; text-decoration:none;">[安全登出]</a>
 </div>
@@ -1065,9 +1173,12 @@ textarea { height:75px; }
   <div class="stat-box"><div class="stat-label">异常/失败</div><div class="stat-val" id="stat-failed" style="color:#ff4444;">0</div></div>
 </div>
 <div class="grid">
-  <div class="card"><h3>操盘战略与拟人化配置</h3>
+  <div class="card"><h3>操盘战略与独立视频播放配置</h3>
     <form id="control-form">
-      <p>目标 URL 列表 (支持首页或直接填播放页，每行一个随机轮询):<br><textarea name="urls" required>{{ cfg.target_urls }}</textarea></p>
+      <p>普通网站 URL 列表 (每行一个随机轮询):<br><textarea name="urls">{{ cfg.target_urls }}</textarea></p>
+      <p style="color:#00ff66;">独立视频播放页 URL 列表 (每行一个，支持直接填播放页):<br>
+        <textarea name="video_urls" placeholder="https://example.com/play.html?id=1">{{ cfg.video_urls }}</textarea>
+      </p>
       <div class="row-3">
         <p>页面加载策略:<br>
           <select name="load_mode">
@@ -1111,8 +1222,9 @@ textarea { height:75px; }
         <p>二级点击目标 (可选):<br><input type="text" name="sub_click_selector" value="{{ cfg.sub_click_selector }}"></p>
       </div>
       <p>自定义 Referer (留空自动权重分流):<br><input type="text" name="referer" value="{{ cfg.referer }}" placeholder="https://www.google.com"></p>
-      <p>拟人行为与网络开关：<br>
-        <label style="color:#00ff66; font-weight:bold;"><input type="checkbox" name="vid" value="true" {% if cfg.play_video %}checked{% endif %}> 自动识别播放器并模拟播放视频 (按设定播放秒数)</label><br>
+      <p>拟人行为与任务开关：<br>
+        <label style="color:#00ff66; font-weight:bold;"><input type="checkbox" name="video_only" value="true" {% if cfg.video_only %}checked{% endif %}> 仅运行独立视频播放任务 (跳过普通网页浏览)</label><br>
+        <label style="color:#00ff66;"><input type="checkbox" name="vid" value="true" {% if cfg.play_video %}checked{% endif %}> 启用全播放器自动起播与时长控制</label><br>
         <label><input type="checkbox" name="browse" value="true" {% if cfg.random_browse %}checked{% endif %}> 启用分段平滑滚动与回看阅读</label><br>
         <label><input type="checkbox" name="human_mouse" value="true" {% if cfg.human_mouse %}checked{% endif %}> 启用随机鼠标轨迹与元素悬停</label><br>
         <label style="color:#ffaa00;"><input type="checkbox" name="block_ads" value="true" {% if cfg.block_ads %}checked{% endif %}> 开启高能耗第三方脚本拦截</label><br>
@@ -1215,7 +1327,7 @@ except Exception as e:
     print(f"👉 你可以手动运行启动: {VENV_PY} {BASE_DIR}/app.py")
 
 print("==================================================")
-print("🎉 恭喜！矩阵自动化操盘系统（GitHub 终极发布版）已安装成功！")
+print("🎉 恭喜！矩阵自动化操盘系统（独立媒体全兼容版）已安装成功！")
 print("📌 访问地址: http://<你的服务器IP>:5000")
 print("🔑 默认登录密码: admin888")
 print("==================================================")
