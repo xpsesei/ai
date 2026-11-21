@@ -334,10 +334,17 @@ def parse_proxy(proxy_str):
 
 def validate_single_proxy(cand):
     pw_proxy, req_proxies = parse_proxy(cand)
-    res = requests.get("http://ip-api.com/json/?lang=zh-CN", proxies=req_proxies, timeout=6)
-    if res.status_code == 200:
-        data = res.json()
-        return True, pw_proxy, data.get("country", "未知国家"), data.get("query", "")
+    try:
+        res = requests.get("http://ip-api.com/json/?lang=zh-CN", proxies=req_proxies, timeout=6)
+        if res.status_code == 200:
+            data = res.json()
+            return True, pw_proxy, data.get("country", "未知国家"), data.get("query", "")
+    except Exception:
+        pass
+    res2 = requests.get("https://api.ipify.org?format=json", proxies=req_proxies, timeout=6)
+    if res2.status_code == 200:
+        ip_val = res2.json().get("ip", "")
+        return True, pw_proxy, "节点可用", ip_val
     return False, None, None, ""
 
 
@@ -350,26 +357,32 @@ def renew_tor_circuit():
         pass
 
 
+def close_other_pages(context, keep_page):
+    for p in list(context.pages):
+        if p != keep_page:
+            try:
+                p.close()
+            except Exception:
+                pass
+
+
 def handle_extra_popups(context, main_page, popup_prob):
     pages = list(context.pages)
     if len(pages) <= 1:
         return main_page
     extra = pages[-1]
     if popup_prob > 0 and random.randint(1, 100) <= popup_prob:
-        add_log(f"🪟 [弹窗保留] 命中 {popup_prob}% 弹窗比例，切入浏览 -> {extra.url[:55]}")
         try:
             extra.wait_for_load_state("domcontentloaded", timeout=15000)
         except Exception:
             pass
+        stay_sec = round(random.uniform(3.0, 5.0), 1)
+        add_log(f"🪟 [弹窗保留] 已弹出并停留 {stay_sec} 秒 -> {extra.url[:90]}")
         capture_preview(extra)
+        safe_sleep(stay_sec)
         return extra
     add_log("🚫 [弹窗关闭] 按比例关闭多余弹窗，保留主页面")
-    for p in pages:
-        if p != main_page:
-            try:
-                p.close()
-            except Exception:
-                pass
+    close_other_pages(context, main_page)
     return main_page
 
 
@@ -570,10 +583,34 @@ def simulate_video_playback(page, profile, play_seconds, do_mouse=True):
 
 
 def perform_click(page, context, selector_str, profile, popup_prob=50, step_label="一级点击"):
-    is_coord, cx, cy = parse_and_scale_coord(selector_str, profile["w"], profile["h"])
+    is_auto = selector_str.strip().lower() in ("auto", "random", "any")
+    auto_el = None
+    auto_desc = ""
+    if is_auto:
+        links = page.locator("a[href]:not([href^='javascript']):not([href='#']):visible")
+        cnt = links.count()
+        if cnt == 0:
+            links = page.locator("button:visible, [role='button']:visible")
+            cnt = links.count()
+        if cnt == 0:
+            add_log(f"⚠️ [{step_label}] 未找到可点击的任意链接")
+            return page
+        pick_idx = random.randint(0, min(cnt - 1, 30))
+        auto_el = links.nth(pick_idx)
+        auto_desc = f"第 {pick_idx+1}/{cnt} 个"
+
+    is_coord, cx, cy = (False, 0, 0) if is_auto else parse_and_scale_coord(selector_str, profile["w"], profile["h"])
     try:
         with context.expect_page(timeout=8000) as popup_info:
-            if is_coord:
+            if is_auto:
+                auto_el.scroll_into_view_if_needed(timeout=4000)
+                safe_sleep(0.4)
+                add_log(f"🎲 [{step_label}] 随机点击任意链接 ({auto_desc})")
+                if profile.get("touch", False):
+                    auto_el.tap(timeout=10000)
+                else:
+                    auto_el.click(timeout=10000)
+            elif is_coord:
                 mode_tag = "触控" if profile.get("touch", False) else "鼠标"
                 if cy >= profile["h"]:
                     scroll_to = max(0, cy - profile["h"] // 2)
@@ -594,25 +631,33 @@ def perform_click(page, context, selector_str, profile, popup_prob=50, step_labe
                     el.click(timeout=10000)
         popup_page = popup_info.value
         if popup_prob > 0 and random.randint(1, 100) <= popup_prob:
-            add_log(f"🪟 [新标签保留] 命中 {popup_prob}% 弹窗比例，打开 -> {popup_page.url[:60]}")
             try:
                 popup_page.wait_for_load_state("domcontentloaded", timeout=20000)
             except Exception:
                 pass
+            stay_sec = round(random.uniform(3.0, 5.0), 1)
+            add_log(f"🪟 [新标签弹窗] 已弹出并停留 {stay_sec} 秒 -> {popup_page.url[:90]}")
+            capture_preview(popup_page)
+            safe_sleep(stay_sec)
             capture_preview(popup_page)
             return popup_page
-        add_log("🚫 [弹窗关闭] 按弹窗比例关闭新标签，留在本页")
+        try:
+            popup_page.wait_for_load_state("domcontentloaded", timeout=5000)
+        except Exception:
+            pass
+        add_log(f"🚫 [弹窗关闭] 按比例关闭弹窗 (原弹窗: {popup_page.url[:60]})")
         try:
             popup_page.close()
         except Exception:
             pass
         return page
     except Exception:
-        add_log(f"ℹ️ [{step_label}] 当前页内继续流转")
         try:
             page.wait_for_load_state("domcontentloaded", timeout=10000)
         except Exception:
             pass
+        safe_sleep(1.0)
+        add_log(f"🔗 [{step_label}] 点击后当前网址 -> {page.url[:90]}")
         capture_preview(page)
         return page
 
@@ -795,7 +840,11 @@ def automation_worker():
                 with sync_playwright() as p:
                     browser = p.chromium.launch(
                         headless=True, proxy=proxy_config,
-                        args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu", "--disable-blink-features=AutomationControlled", "--autoplay-policy=no-user-gesture-required"]
+                        args=[
+                            "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage",
+                            "--disable-gpu", "--disable-blink-features=AutomationControlled",
+                            "--autoplay-policy=no-user-gesture-required", "--disable-popup-blocking"
+                        ]
                     )
                     context = browser.new_context(
                         viewport={"width": profile["w"], "height": profile["h"]},
@@ -856,9 +905,11 @@ def automation_worker():
                         if enable_click and click_selector and click_prob > 0 and random.randint(1, 100) <= click_prob and not stop_event.is_set():
                             clicked_page = perform_click(active_page, context, click_selector, profile, popup_prob=popup_prob, step_label="首页一级点击")
                             if sub_click_selector and not stop_event.is_set():
-                                perform_click(clicked_page, context, sub_click_selector, profile, popup_prob=popup_prob, step_label="首页二级点击")
-                            if clicked_page != page:
-                                active_page = page
+                                clicked_sub = perform_click(clicked_page, context, sub_click_selector, profile, popup_prob=popup_prob, step_label="首页二级点击")
+                                safe_sleep(1.5)
+                                capture_preview(clicked_sub)
+                            close_other_pages(context, page)
+                            active_page = page
 
                         if enable_inner and inner_prob > 0 and max_inner > 0 and random.randint(1, 100) <= inner_prob and not stop_event.is_set():
                             pages_to_visit = random.randint(1, max_inner)
@@ -868,6 +919,7 @@ def automation_worker():
                                 if stop_event.is_set():
                                     break
                                 try:
+                                    close_other_pages(context, page)
                                     all_links = page.evaluate("Array.from(document.querySelectorAll('a')).map(a => a.href)")
                                     internal_links = [
                                         l for l in all_links
@@ -922,6 +974,7 @@ def automation_worker():
                                     break
 
                     if has_video_task and not stop_event.is_set():
+                        close_other_pages(context, page)
                         if video_list:
                             v_url = random.choice(video_list)
                             if not v_url.startswith(("http://", "https://")):
@@ -1113,7 +1166,8 @@ def pick_page():
                 "image": "data:image/png;base64," + b64,
                 "elements": elements,
                 "vw": vw,
-                "vh": doc_h
+                "vh": doc_h,
+                "base_h": vh
             })
     except Exception as e:
         return jsonify({"status": "failed", "msg": f"加载页面失败: {str(e)[:80]}"})
@@ -1395,7 +1449,7 @@ textarea { height:60px; }
       </div>
 
       <div class="sub-card">
-        <label class="sw"><input type="checkbox" id="chk-enable-click" name="enable_click" value="true" {% if cfg.enable_click %}checked{% endif %}> [开关6] 启用链式点击流 (支持可视化整页点选)</label>
+        <label class="sw"><input type="checkbox" id="chk-enable-click" name="enable_click" value="true" {% if cfg.enable_click %}checked{% endif %}> [开关6] 启用链式点击流 (支持整页点选与随机链接)</label>
         <div class="row-3" style="margin-top:6px;">
           <p style="margin:0;">首页点击比例 (%, 0=不点):<br><input type="number" name="click_prob" value="{{ cfg.click_prob }}"></p>
           <p style="margin:0;">内页点击比例 (%, 0=不点):<br><input type="number" name="inner_click_prob" value="{{ cfg.inner_click_prob }}"></p>
@@ -1403,7 +1457,7 @@ textarea { height:60px; }
         </div>
         <div class="row-2" style="margin-top:6px;">
           <p style="margin:0;">一级点击目标: <button type="button" class="btn btn-warn" style="padding:2px 8px; font-size:11px;" onclick="openPicker('click_selector')">🎯 网页点选</button><br><input type="text" id="input-click-selector" name="click_selector" value="{{ cfg.click_selector }}" placeholder="CSS 选择器或 coord:X,Y"></p>
-          <p style="margin:0;">二级点击目标: <button type="button" class="btn btn-warn" style="padding:2px 8px; font-size:11px;" onclick="openPicker('sub_click_selector')">🎯 网页点选</button><br><input type="text" id="input-sub-click-selector" name="sub_click_selector" value="{{ cfg.sub_click_selector }}"></p>
+          <p style="margin:0;">二级点击目标: <button type="button" class="btn btn-warn" style="padding:2px 8px; font-size:11px;" onclick="openPicker('sub_click_selector')">🎯 点选</button> <button type="button" class="btn" style="padding:2px 8px; font-size:11px;" onclick="document.getElementById('input-sub-click-selector').value='auto'">🎲 随机任意链接</button><br><input type="text" id="input-sub-click-selector" name="sub_click_selector" value="{{ cfg.sub_click_selector }}" placeholder="填 auto 随机点任意链接"></p>
         </div>
       </div>
 
@@ -1543,6 +1597,7 @@ let pickerTargetField = 'click_selector';
 let pickerElements = [];
 let pickerVW = 1920;
 let pickerVH = 1080;
+let pickerBaseH = 1080;
 
 function openPicker(field) {
   pickerTargetField = field;
@@ -1576,6 +1631,7 @@ function loadPickerPage() {
         pickerElements = d.elements || [];
         pickerVW = d.vw || 1920;
         pickerVH = d.vh || 1080;
+        pickerBaseH = d.base_h || 1080;
         img.src = d.image;
         img.style.display = 'block';
         st.innerText = '✅ 整页画面已就绪！可上下滚动并点击你想让程序操作的位置。';
@@ -1602,7 +1658,7 @@ function onPickerClick(e) {
 
   const mode = document.getElementById('picker-mode').value;
   const scaledX = Math.round((realX / pickerVW) * 1920);
-  const scaledY = Math.round((realY / pickerVW) * 1920);
+  const scaledY = Math.round((realY / pickerBaseH) * 1080);
   let finalVal = 'coord:' + scaledX + ',' + scaledY;
   if (mode === 'css' && matched && matched.selector) {
     finalVal = matched.selector;
@@ -1633,6 +1689,7 @@ After=network.target
 [Service]
 Type=simple
 User=root
+Environment=PYTHONUNBUFFERED=1
 WorkingDirectory={BASE_DIR}
 ExecStart={VENV_PY} {BASE_DIR}/app.py
 Restart=always
